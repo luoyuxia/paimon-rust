@@ -38,9 +38,18 @@ mod index_file_meta;
 pub use index_file_meta::*;
 
 mod index_manifest;
+mod manifest;
+pub use manifest::*;
+
 mod manifest_common;
+pub use manifest_common::*;
+
 mod manifest_entry;
+pub use manifest_entry::*;
+
 mod objects_file;
+pub use objects_file::*;
+
 mod stats;
 mod types;
 

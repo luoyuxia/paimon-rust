@@ -19,6 +19,9 @@ use crate::spec::types::DataType;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+pub type TableSchemaRef = Arc<TableSchema>;
 
 /// The table schema for paimon table.
 ///
@@ -50,6 +53,60 @@ pub struct DataField {
     typ: DataType,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
+}
+
+impl TableSchema {
+    pub fn version(&self) -> i32 {
+        self.version
+    }
+
+    pub fn id(&self) -> i64 {
+        self.id
+    }
+
+    pub fn fields(&self) -> &[DataField] {
+        &self.fields
+    }
+
+    pub fn highest_field_id(&self) -> i32 {
+        self.highest_field_id
+    }
+
+    pub fn partition_keys(&self) -> &[String] {
+        &self.partition_keys
+    }
+
+    pub fn primary_keys(&self) -> &[String] {
+        &self.primary_keys
+    }
+
+    pub fn options(&self) -> &HashMap<String, String> {
+        &self.options
+    }
+
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_deref()
+    }
+
+    pub fn time_millis(&self) -> i64 {
+        self.time_millis
+    }
+
+    /// Create a copy of this schema with new options.
+    /// Equivalent to `copy(branchOptions.toMap())` in Java.
+    pub fn with_options(&self, options: HashMap<String, String>) -> Self {
+        Self {
+            version: self.version,
+            id: self.id,
+            fields: self.fields.clone(),
+            highest_field_id: self.highest_field_id,
+            partition_keys: self.partition_keys.clone(),
+            primary_keys: self.primary_keys.clone(),
+            options,
+            comment: self.comment.clone(),
+            time_millis: self.time_millis,
+        }
+    }
 }
 
 impl DataField {

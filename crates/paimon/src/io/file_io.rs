@@ -105,11 +105,12 @@ impl FileIO {
         let mut statuses = Vec::new();
 
         for entry in entries {
-            let meta = entry.metadata();
+            let meta = op.stat(entry.path())
+                .await?;
             statuses.push(FileStatus {
                 size: meta.content_length(),
                 is_dir: meta.is_dir(),
-                path: path.to_string(),
+                path: entry.path().to_string(),
                 last_modified: meta.last_modified(),
             });
         }
@@ -245,18 +246,18 @@ impl FileRead for opendal::Reader {
 
 #[async_trait::async_trait]
 pub trait FileWrite: Send + Unpin + 'static {
-    async fn write(&mut self, bs: Bytes) -> crate::Result<()>;
+    async fn write(&mut self, bs: Bytes) -> Result<()>;
 
-    async fn close(&mut self) -> crate::Result<()>;
+    async fn close(&mut self) -> Result<()>;
 }
 
 #[async_trait::async_trait]
 impl FileWrite for opendal::Writer {
-    async fn write(&mut self, bs: Bytes) -> crate::Result<()> {
+    async fn write(&mut self, bs: Bytes) -> Result<()> {
         Ok(opendal::Writer::write(self, bs).await?)
     }
 
-    async fn close(&mut self) -> crate::Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(opendal::Writer::close(self).await?)
     }
 }

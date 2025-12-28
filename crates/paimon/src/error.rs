@@ -23,11 +23,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// Error type for paimon.
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Paimon data invalid for {}: {:?}", message, source))]
+    #[snafu(whatever, display("Paimon data invalid for {}: {:?}", message, source))]
     DataInvalid {
         message: String,
-        #[snafu(backtrace)]
-        source: snafu::Whatever,
+        /// see https://github.com/shepmaster/snafu/issues/446
+        #[snafu(source(from(Box<dyn std::error::Error + Send + Sync + 'static>, Some)))]
+        source: Option<Box<dyn std::error::Error + Send + 'static>>,
     },
     #[snafu(
         visibility(pub(crate)),
@@ -62,6 +63,14 @@ pub enum Error {
     },
     #[snafu(
         visibility(pub(crate)),
+        display("Paimon hitting unexpected parquet error: {}", message)
+    )]
+    ParquetDataUnexpected {
+        message: String,
+        source: parquet::errors::ParquetError,
+    },
+    #[snafu(
+        visibility(pub(crate)),
         display("Paimon hitting invalid file index format: {}", message)
     )]
     FileIndexFormatInvalid { message: String },
@@ -81,6 +90,15 @@ impl From<apache_avro::Error> for Error {
     fn from(source: apache_avro::Error) -> Self {
         Error::DataUnexpected {
             message: "".to_string(),
+            source,
+        }
+    }
+}
+
+impl From<parquet::errors::ParquetError> for Error {
+    fn from(source: parquet::errors::ParquetError) -> Self {
+        Error::ParquetDataUnexpected {
+            message: format!("Failed to read a Parquet file: {}", source),
             source,
         }
     }

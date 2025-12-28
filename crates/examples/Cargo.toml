@@ -1,0 +1,15 @@
+[package]
+name = "paimon-examples"
+repository.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+paimon = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3.31"
+
+[[example]]
+name = "paimon-read"
+path = "src/paimon_read.rs"

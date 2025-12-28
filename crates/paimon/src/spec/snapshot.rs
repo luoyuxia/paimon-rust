@@ -17,7 +17,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use typed_builder::TypedBuilder;
+
+pub type SnapshotRef = Arc<Snapshot>;
 
 /// Type of changes in this snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -47,8 +50,16 @@ pub struct Snapshot {
     schema_id: i64,
     /// a manifest list recording all changes from the previous snapshots
     base_manifest_list: String,
+    /// size of base manifest list
+    #[builder(default = None)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_manifest_list_size: Option<i64>,
     /// a manifest list recording all new changes occurred in this snapshot
     delta_manifest_list: String,
+    /// size of delta manifest list
+    #[builder(default = None)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delta_manifest_list_size: Option<i64>,
     /// a manifest list recording all changelog produced in this snapshot
     #[builder(default = None)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,6 +103,10 @@ pub struct Snapshot {
     #[builder(default = None)]
     #[serde(skip_serializing_if = "Option::is_none")]
     statistics: Option<String>,
+    /// next row id for this snapshot
+    #[builder(default = None)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_row_id: Option<i64>,
 }
 
 impl Snapshot {
@@ -189,6 +204,24 @@ impl Snapshot {
     #[inline]
     pub fn statistics(&self) -> Option<&str> {
         self.statistics.as_deref()
+    }
+
+    /// Get the base manifest list size of this snapshot.
+    #[inline]
+    pub fn base_manifest_list_size(&self) -> Option<i64> {
+        self.base_manifest_list_size
+    }
+
+    /// Get the delta manifest list size of this snapshot.
+    #[inline]
+    pub fn delta_manifest_list_size(&self) -> Option<i64> {
+        self.delta_manifest_list_size
+    }
+
+    /// Get the next row id of this snapshot.
+    #[inline]
+    pub fn next_row_id(&self) -> Option<i64> {
+        self.next_row_id
     }
 }
 

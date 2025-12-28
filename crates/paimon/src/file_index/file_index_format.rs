@@ -23,6 +23,7 @@ use crate::{
     io::{FileIO, FileRead, FileStatus, InputFile, OutputFile},
     Error,
 };
+use crate::arrow::schema_to_arrow_schema;
 
 /// Default 1MB read block size
 const READ_BLOCK_SIZE: u64 = 1024 * 1024;

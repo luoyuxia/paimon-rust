@@ -19,6 +19,9 @@ mod error;
 pub use error::Error;
 pub use error::Result;
 
+pub mod catalog;
 pub mod file_index;
 pub mod io;
+pub mod scan;
 pub mod spec;
+pub mod arrow;

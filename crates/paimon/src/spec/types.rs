@@ -103,9 +103,9 @@ pub enum DataType {
     Row(RowType),
 }
 
-#[allow(dead_code)]
 impl DataType {
-    fn is_nullable(&self) -> bool {
+    /// Returns whether this data type is nullable.
+    pub fn is_nullable(&self) -> bool {
         match self {
             DataType::Boolean(v) => v.nullable,
             DataType::TinyInt(v) => v.nullable,
@@ -160,6 +160,11 @@ impl ArrayType {
 
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED | DataTypeFamily::COLLECTION
+    }
+    
+    
+    pub fn element_type(&self) -> &DataType {
+        &self.element_type
     }
 }
 
@@ -1175,6 +1180,15 @@ impl FromStr for VarCharType {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Handle "STRING" type (alias for VARCHAR)
+        if s == "STRING" || s.starts_with("STRING ") {
+            let nullable = !s.contains("NOT NULL");
+            return Ok(VarCharType {
+                nullable,
+                length: Self::MAX_LENGTH,
+            });
+        }
+
         if !s.starts_with(serde_utils::VARCHAR::NAME) {
             return DataTypeInvalidSnafu {
                 message: "Invalid VARCHAR type. Expected string to start with 'VARCHAR'.",
@@ -1265,6 +1279,14 @@ impl MapType {
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED | DataTypeFamily::COLLECTION
     }
+    
+    pub fn key_type(&self) -> &DataType {
+        &self.key_type
+    }
+    
+    pub fn value_type(&self) -> &DataType {
+        &self.value_type
+    }
 }
 
 /// MultisetType for paimon.
@@ -1298,6 +1320,10 @@ impl MultisetType {
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED | DataTypeFamily::COLLECTION
     }
+    
+    pub fn element_type(&self) -> &DataType {
+        &self.element_type
+    }
 }
 
 /// RowType for paimon.
@@ -1328,6 +1354,10 @@ impl RowType {
 
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED
+    }
+    
+    pub fn fields(&self) -> &[DataField] {
+        &self.fields
     }
 }
 

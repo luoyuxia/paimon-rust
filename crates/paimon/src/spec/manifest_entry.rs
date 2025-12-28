@@ -18,7 +18,10 @@
 use crate::spec::manifest_common::FileKind;
 use crate::spec::DataFileMeta;
 use serde::Deserialize;
-use serde_with::serde_derive::Serialize;
+use serde::Serialize;
+use std::sync::Arc;
+
+pub type ManifestEntryRef = Arc<ManifestEntry>;
 
 /// The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data file.
 ///
@@ -56,15 +59,15 @@ pub struct ManifestEntry {
 
 #[allow(dead_code)]
 impl ManifestEntry {
-    fn kind(&self) -> &FileKind {
+    pub fn kind(&self) -> &FileKind {
         &self.kind
     }
 
-    fn partition(&self) -> &Vec<u8> {
+    pub fn partition(&self) -> &[u8] {
         &self.partition
     }
 
-    fn bucket(&self) -> i32 {
+    pub fn bucket(&self) -> i32 {
         self.bucket
     }
 
@@ -99,6 +102,10 @@ impl ManifestEntry {
 
     pub fn file(&self) -> &DataFileMeta {
         &self.file
+    }
+
+    pub fn version(&self) -> i32 {
+        self.version
     }
 
     pub fn new(
