@@ -58,6 +58,8 @@ futures = "0.3"
 parquet = { version = "55", features = ["async", "zstd"] }
 async-stream = "0.3.6"
 anyhow = "1.0.72"
+roaring = "0.10"
+crc32fast = "1.4"
 
 [dev-dependencies]
 rand = "0.8.5"

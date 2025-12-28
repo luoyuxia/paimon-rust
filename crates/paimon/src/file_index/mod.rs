@@ -16,4 +16,4 @@
 // under the License.
 
 mod file_index_format;
-pub use file_index_format::*;
+pub use file_index_format::{FileIndex, FileIndexFormatReader};

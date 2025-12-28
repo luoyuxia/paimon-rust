@@ -13,3 +13,9 @@ futures-util = "0.3.31"
 [[example]]
 name = "paimon-read"
 path = "src/paimon_read.rs"
+
+
+
+[[example]]
+name = "paimon-dv-read"
+path = "src/paimon_dv_read.rs"
