@@ -98,7 +98,7 @@ impl From<apache_avro::Error> for Error {
 impl From<parquet::errors::ParquetError> for Error {
     fn from(source: parquet::errors::ParquetError) -> Self {
         Error::ParquetDataUnexpected {
-            message: format!("Failed to read a Parquet file: {}", source),
+            message: format!("Failed to read a Parquet file: {source}"),
             source,
         }
     }

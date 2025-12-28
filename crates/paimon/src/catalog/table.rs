@@ -63,7 +63,7 @@ impl Table {
     pub async fn snapshot_by_id(&self, snapshot_id: i64) -> Result<Option<Snapshot>> {
         let snapshot_path = PathBuf::from(&self.path)
             .join("snapshot")
-            .join(format!("snapshot-{}", snapshot_id.to_string()));
+            .join(format!("snapshot-{snapshot_id}"));
 
         let snapshot_file = self.file_io.new_input(&snapshot_path.to_string_lossy())?;
 
@@ -103,7 +103,7 @@ impl Table {
                     Ok(Some(snapshot))
                 } else {
                     Err(Error::DataInvalid {
-                        message: format!("Failed to read snapshot with ID {}", snapshot_id),
+                        message: format!("Failed to read snapshot with ID {snapshot_id}"),
                         source: None,
                     })
                 }
@@ -133,7 +133,7 @@ impl Table {
         // Try to read schema file with schema_id first
         let schema_path_with_id = PathBuf::from(&self.path)
             .join("schema")
-            .join(format!("schema-{}", schema_id));
+            .join(format!("schema-{schema_id}"));
 
         if let Ok(schema_file) = self
             .file_io
@@ -141,7 +141,7 @@ impl Table {
         {
             if schema_file.exists().await.ok()? {
                 if let Ok(content) = schema_file.read().await {
-                    if let Ok(schema) = serde_json::from_slice::<TableSchema>(&content.to_vec()) {
+                    if let Ok(schema) = serde_json::from_slice::<TableSchema>(&content) {
                         if schema.id() == schema_id {
                             return Some(schema);
                         }

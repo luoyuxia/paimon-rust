@@ -23,7 +23,6 @@ use crate::{
     io::{FileIO, FileRead, FileStatus, InputFile, OutputFile},
     Error,
 };
-use crate::arrow::schema_to_arrow_schema;
 
 /// Default 1MB read block size
 const READ_BLOCK_SIZE: u64 = 1024 * 1024;
@@ -231,7 +230,7 @@ impl FileIndex {
             Ok(result)
         } else {
             Err(Error::FileIndexFormatInvalid {
-                message: format!("Column '{}' not found in header", column_name),
+                message: format!("Column '{column_name}' not found in header"),
             })
         }
     }
@@ -258,6 +257,15 @@ impl FileIndex {
             .read(index_info.start_pos as u64..(index_info.start_pos + index_info.length) as u64)
             .await?;
 
+        Ok(data_bytes)
+    }
+
+    /// Read bytes from the index file at the specified position and length
+    pub async fn read_bytes(&self, start: i64, length: i64) -> crate::Result<Bytes> {
+        let data_bytes = self
+            .reader
+            .read(start as u64..(start + length) as u64)
+            .await?;
         Ok(data_bytes)
     }
 }
@@ -293,7 +301,7 @@ impl FileIndexFormatReader {
         let magic = buffer.get_u64_le();
         if magic != MAGIC {
             return Err(Error::FileIndexFormatInvalid {
-                message: format!("Expected MAGIC: {}, but found: {}", MAGIC, magic),
+                message: format!("Expected MAGIC: {MAGIC}, but found: {magic}"),
             });
         }
 
@@ -340,7 +348,7 @@ impl FileIndexFormatReader {
             // Column Name (variable-length UTF-8 string)
             let column_name = String::from_utf8(buffer.split_to(column_name_len as usize).to_vec())
                 .map_err(|e| Error::FileIndexFormatInvalid {
-                    message: format!("Invalid UTF-8 sequence in column name: {}", e),
+                    message: format!("Invalid UTF-8 sequence in column name: {e}"),
                 })?;
             current_offset += column_name_len as u64;
 
@@ -431,11 +439,11 @@ mod file_index_format_tests {
 
         let mut indexes = HashMap::new();
         for col_num in 1..5 {
-            let column_name = format!("column{}", col_num);
+            let column_name = format!("column{col_num}");
             let mut index_map = HashMap::new();
             for idx_num in 1..5 {
                 index_map.insert(
-                    format!("index{}", idx_num),
+                    format!("index{idx_num}"),
                     random_bytes(100 + col_num * idx_num),
                 );
             }

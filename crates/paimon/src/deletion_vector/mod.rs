@@ -15,14 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod error;
-pub use error::Error;
-pub use error::Result;
+//! Deletion Vector module for filtering deleted rows in Paimon primary key tables.
+//!
+//! This module implements deletion vector support similar to the Java implementation
+//! in `org.apache.paimon.deletionvectors.DeletionVector`.
 
-pub mod catalog;
-pub mod deletion_vector;
-pub mod file_index;
-pub mod io;
-pub mod scan;
-pub mod spec;
-pub mod arrow;
+mod deletion_vector;
+mod factory;
+
+pub use deletion_vector::DeletionVector;
+pub use factory::DeletionVectorFactory;
+

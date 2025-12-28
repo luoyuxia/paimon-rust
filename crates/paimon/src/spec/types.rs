@@ -1537,8 +1537,7 @@ mod serde_utils {
         let Some(open_bracket) = s.find('(') else {
             return Err(Error::DataTypeInvalid {
                 message: format!(
-                    "Invalid {} specification. Missing opening bracket.",
-                    type_name
+                    "Invalid {type_name} specification. Missing opening bracket."
                 )
                 .to_string(),
             });
@@ -1546,8 +1545,7 @@ mod serde_utils {
         let Some(close_bracket) = s.find(')') else {
             return Err(Error::DataTypeInvalid {
                 message: format!(
-                    "Invalid {} specification. Missing closing bracket.",
-                    type_name
+                    "Invalid {type_name} specification. Missing closing bracket."
                 )
                 .to_string(),
             });
@@ -1556,9 +1554,8 @@ mod serde_utils {
         if open_bracket >= close_bracket {
             return Err(Error::DataTypeInvalid {
                 message: format!(
-                    "Invalid {} specification. Opening bracket \
-                appears after or at the same position as closing bracket.",
-                    type_name
+                    "Invalid {type_name} specification. Opening bracket \
+                appears after or at the same position as closing bracket."
                 )
                 .to_string(),
             });

@@ -160,7 +160,7 @@ impl Schema {
         for pk in &self.primary_keys {
             if !field_names.contains(pk) {
                 return Err(Error::ConfigInvalid {
-                    message: format!("Primary key '{}' does not exist in schema fields", pk),
+                    message: format!("Primary key '{pk}' does not exist in schema fields"),
                 });
             }
         }
@@ -168,7 +168,7 @@ impl Schema {
         for pk in &self.partition_keys {
             if !field_names.contains(pk) {
                 return Err(Error::ConfigInvalid {
-                    message: format!("Partition key '{}' does not exist in schema fields", pk),
+                    message: format!("Partition key '{pk}' does not exist in schema fields"),
                 });
             }
         }
@@ -224,7 +224,7 @@ impl Schema {
         });
 
         serde_json::from_value(table_schema_json).map_err(|e| Error::DataInvalid {
-            message: format!("Failed to create TableSchema from Schema: {}", e),
+            message: format!("Failed to create TableSchema from Schema: {e}"),
             source: Some(Box::new(e)),
         })
     }

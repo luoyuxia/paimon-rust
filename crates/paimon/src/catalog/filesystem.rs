@@ -20,7 +20,6 @@
 //! This catalog stores table metadata in the file system.
 //! Reference: <https://github.com/apache/paimon/blob/release-0.8.2/paimon-core/src/main/java/org/apache/paimon/catalog/FileSystemCatalog.java>
 
-use std::fmt::format;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -142,7 +141,7 @@ impl FileSystemCatalog {
     /// Equivalent to `schema(version)` in Java SchemaManager.
     async fn load_schema_by_version(&self, schema_dir: &Path, version: i64) -> Result<TableSchema> {
         const SCHEMA_PREFIX: &str = "schema-";
-        let schema_file_path = schema_dir.join(format!("{}{}", SCHEMA_PREFIX, version));
+        let schema_file_path = schema_dir.join(format!("{SCHEMA_PREFIX}{version}"));
         
         let schema_file =  self.file_io.new_input(&schema_file_path.to_string_lossy())?;
 
@@ -231,7 +230,7 @@ impl FileSystemCatalog {
         let schema_file = self.file_io.new_output(&schema_path.to_string_lossy())?;
 
         let content = serde_json::to_string_pretty(schema).map_err(|e| Error::DataInvalid {
-            message: format!("Failed to serialize schema for table {:?}", identifier),
+            message: format!("Failed to serialize schema for table {identifier:?}"),
             source: Some(Box::new(e)),
         })?;
 
@@ -265,7 +264,7 @@ impl FileSystemCatalog {
                         let snapshot_content = actual_snapshot_file.read().await?;
                         let snapshot: Snapshot =
                             serde_json::from_slice(&snapshot_content).map_err(|e| Error::DataInvalid {
-                                message: format!("Failed to parse snapshot for table {:?}", identifier),
+                                message: format!("Failed to parse snapshot for table {identifier:?}"),
                                 source: Some(Box::new(e)),
                             })?;
                         return Ok(Some(snapshot));
@@ -275,7 +274,7 @@ impl FileSystemCatalog {
                 // Try to parse as full snapshot JSON
                 let snapshot: Snapshot =
                     serde_json::from_slice(&content).map_err(|e| Error::DataInvalid {
-                        message: format!("Failed to parse snapshot for table {:?}", identifier),
+                        message: format!("Failed to parse snapshot for table {identifier:?}"),
                         source: Some(Box::new(e)),
                     })?;
                 Ok(Some(snapshot))
@@ -319,7 +318,7 @@ impl Catalog for FileSystemCatalog {
                 return Ok(());
             }
             return Err(Error::ConfigInvalid {
-                message: format!("Database '{}' already exists", database),
+                message: format!("Database '{database}' already exists"),
             });
         }
 
@@ -341,7 +340,7 @@ impl Catalog for FileSystemCatalog {
                 return Ok(());
             }
             return Err(Error::ConfigInvalid {
-                message: format!("Database '{}' does not exist", database),
+                message: format!("Database '{database}' does not exist"),
             });
         }
 
@@ -371,7 +370,7 @@ impl Catalog for FileSystemCatalog {
     async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
         if !self.database_exists(database).await? {
             return Err(Error::ConfigInvalid {
-                message: format!("Database '{}' does not exist", database),
+                message: format!("Database '{database}' does not exist"),
             });
         }
 

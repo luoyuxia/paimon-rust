@@ -127,7 +127,7 @@ impl Manifest {
     ) -> Result<ManifestFileMeta> {
         let mut num_added_files = 0i64;
         let mut num_deleted_files = 0i64;
-        let mut partition_stats = BinaryTableStats::new(Vec::new(), Vec::new(), Vec::new());
+        let partition_stats = BinaryTableStats::new(Vec::new(), Vec::new(), Vec::new());
 
         for entry in entries {
             match entry.kind() {
@@ -166,7 +166,7 @@ mod tests {
     fn load_fixture(name: &str) -> Vec<u8> {
         let path = current_dir()
             .unwrap_or_else(|err| panic!("current_dir must exist: {err}"))
-            .join(format!("tests/fixtures/manifest/{}", name));
+            .join(format!("tests/fixtures/manifest/{name}"));
         std::fs::read(&path).unwrap_or_else(|err| panic!("fixtures {path:?} load failed: {err}"))
     }
 

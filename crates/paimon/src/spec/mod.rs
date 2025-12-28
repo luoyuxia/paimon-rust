@@ -38,6 +38,7 @@ mod index_file_meta;
 pub use index_file_meta::*;
 
 mod index_manifest;
+pub use index_manifest::*;
 mod manifest;
 pub use manifest::*;
 
