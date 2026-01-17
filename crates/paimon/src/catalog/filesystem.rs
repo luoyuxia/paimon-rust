@@ -20,8 +20,8 @@
 //! This catalog stores table metadata in the file system.
 //! Reference: <https://github.com/apache/paimon/blob/release-0.8.2/paimon-core/src/main/java/org/apache/paimon/catalog/FileSystemCatalog.java>
 
-use std::fmt::format;
 use async_trait::async_trait;
+use std::fmt::format;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,10 +49,9 @@ pub struct FileSystemCatalog {
 }
 
 impl FileSystemCatalog {
-    
     const DB_SUFFIX: &'static str = ".db";
     const DEFAULT_DATABASE: &'static str = "default";
-    
+
     /// Create a new FileSystemCatalog.
     ///
     /// # Arguments
@@ -72,7 +71,8 @@ impl FileSystemCatalog {
     }
 
     fn database_path(&self, database: &str) -> PathBuf {
-        self.warehouse_path.join(format!("{}{}", database, Self::DB_SUFFIX))
+        self.warehouse_path
+            .join(format!("{}{}", database, Self::DB_SUFFIX))
     }
 
     fn table_path(&self, identifier: &Identifier) -> PathBuf {
@@ -107,9 +107,9 @@ impl FileSystemCatalog {
     /// Equivalent to `listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX).reduce(Math::max)` in Java.
     async fn latest_schema_version(&self, schema_dir: &Path) -> Option<i64> {
         const SCHEMA_PREFIX: &str = "schema-";
-        
+
         let schema_dir = format!("{}/", schema_dir.to_string_lossy());
-        
+
         let statuses = match self.file_io.list_status(&schema_dir).await {
             Ok(statuses) => statuses,
             Err(_) => return None,
@@ -143,16 +143,16 @@ impl FileSystemCatalog {
     async fn load_schema_by_version(&self, schema_dir: &Path, version: i64) -> Result<TableSchema> {
         const SCHEMA_PREFIX: &str = "schema-";
         let schema_file_path = schema_dir.join(format!("{}{}", SCHEMA_PREFIX, version));
-        
-        let schema_file =  self.file_io.new_input(&schema_file_path.to_string_lossy())?;
+
+        let schema_file = self
+            .file_io
+            .new_input(&schema_file_path.to_string_lossy())?;
 
         let content = schema_file.read().await?;
 
-        serde_json::from_slice(&content).map_err(|e|  {
-            Error::DataInvalid {
-                message: "Fail to parse table schema from schema file".to_string(),
-                source: Some(Box::new(e)),
-            }
+        serde_json::from_slice(&content).map_err(|e| Error::DataInvalid {
+            message: "Fail to parse table schema from schema file".to_string(),
+            source: Some(Box::new(e)),
         })
     }
 
@@ -160,7 +160,7 @@ impl FileSystemCatalog {
     /// Fallback when no versioned schema files are found.
     async fn load_default_schema(&self, schema_dir: &Path) -> Option<TableSchema> {
         let schema_file_path = schema_dir;
-        
+
         let schema_file = match self.file_io.new_input(&schema_file_path.to_string_lossy()) {
             Ok(file) => file,
             Err(_) => return None,
@@ -191,13 +191,14 @@ impl FileSystemCatalog {
         const BRANCH_KEY: &str = "branch";
 
         let schema_dir = self.schema_directory(table_location);
-        
+
         let latest_version = self.latest_schema_version(&schema_dir).await;
         if latest_version.is_none() {
-           return Ok(None)
+            return Ok(None);
         }
-        let mut schema = self.load_schema_by_version(&schema_dir,
-                                                 latest_version.unwrap()).await?;
+        let mut schema = self
+            .load_schema_by_version(&schema_dir, latest_version.unwrap())
+            .await?;
 
         // If not default branch, add BRANCH option
         if branch_name != DEFAULT_MAIN_BRANCH {
@@ -208,7 +209,10 @@ impl FileSystemCatalog {
 
         // Add PATH option
         let mut final_options = schema.options().clone();
-        final_options.insert(PATH_KEY.to_string(), table_location.to_string_lossy().to_string());
+        final_options.insert(
+            PATH_KEY.to_string(),
+            table_location.to_string_lossy().to_string(),
+        );
         schema = schema.with_options(final_options);
 
         Ok(Some(schema))
@@ -219,7 +223,8 @@ impl FileSystemCatalog {
         // For now, use empty string as default branch name since branch support is not yet implemented
         let branch_name = ""; // identifier.getBranchNameOrDefault() equivalent
 
-        self.table_schema_in_file_system(&table_location, branch_name).await?
+        self.table_schema_in_file_system(&table_location, branch_name)
+            .await?
             .ok_or(Error::DataInvalid {
                 message: "table don't exist".to_string(),
                 source: None,
@@ -249,7 +254,7 @@ impl FileSystemCatalog {
                     return Ok(None);
                 }
                 let content = file.read().await?;
-                
+
                 // LATEST file may contain either:
                 // 1. A snapshot ID (integer) - need to read the snapshot file
                 // 2. A full snapshot JSON object
@@ -257,21 +262,27 @@ impl FileSystemCatalog {
                 if let Ok(snapshot_id_str) = String::from_utf8(content.clone().to_vec()) {
                     if let Ok(snapshot_id) = snapshot_id_str.trim().parse::<i64>() {
                         // LATEST contains snapshot ID, read the actual snapshot file
-                        let actual_snapshot_path = self.snapshot_path(identifier).join(snapshot_id.to_string());
-                        let actual_snapshot_file = self.file_io.new_input(&actual_snapshot_path.to_string_lossy())?;
+                        let actual_snapshot_path =
+                            self.snapshot_path(identifier).join(snapshot_id.to_string());
+                        let actual_snapshot_file = self
+                            .file_io
+                            .new_input(&actual_snapshot_path.to_string_lossy())?;
                         if !actual_snapshot_file.exists().await? {
                             return Ok(None);
                         }
                         let snapshot_content = actual_snapshot_file.read().await?;
-                        let snapshot: Snapshot =
-                            serde_json::from_slice(&snapshot_content).map_err(|e| Error::DataInvalid {
-                                message: format!("Failed to parse snapshot for table {:?}", identifier),
+                        let snapshot: Snapshot = serde_json::from_slice(&snapshot_content)
+                            .map_err(|e| Error::DataInvalid {
+                                message: format!(
+                                    "Failed to parse snapshot for table {:?}",
+                                    identifier
+                                ),
                                 source: Some(Box::new(e)),
                             })?;
                         return Ok(Some(snapshot));
                     }
                 }
-                
+
                 // Try to parse as full snapshot JSON
                 let snapshot: Snapshot =
                     serde_json::from_slice(&content).map_err(|e| Error::DataInvalid {

@@ -1,20 +1,23 @@
 use crate::deletion_vector::DeletionVector;
 use crate::io::{FileIO, FileRead, FileStatus};
 use crate::scan::{ArrowRecordBatchStream, FileScanTaskStream};
-use crate::spec::{TableSchema, TableSchemaRef};
+use crate::spec::TableSchemaRef;
+use arrow::array::RecordBatch;
 use async_stream::try_stream;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryFutureExt};
-use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::arrow_reader::ArrowReaderOptions;
+use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use parquet::arrow::ProjectionMask;
 use parquet::file::metadata::ParquetMetaData;
+
+use arrow_array::UInt64Array;
+use parquet::file::metadata::ParquetMetaDataReader;
 use std::ops::Range;
 use std::sync::Arc;
-use parquet::arrow::arrow_reader::ArrowReaderOptions;
 use tokio::try_join;
-use arrow_array::{RecordBatch, UInt64Array};
 
 pub struct ArrowReaderBuilder {
     batch_size: Option<usize>,
@@ -38,7 +41,6 @@ impl ArrowReaderBuilder {
         self.batch_size = Some(batch_size);
         self
     }
-    
 
     /// Build the ArrowReader.
     pub fn build(self) -> ArrowReader {
@@ -101,14 +103,12 @@ impl ArrowReader {
 
                         while let Some(batch) = batch_stream.next().await {
                             let batch = batch?;
-                            
                             // Apply deletion vector if available
                             let filtered_batch = if let Some(dv) = &deletion_vector {
                                 Self::filter_deleted_rows(batch, dv, row_offset)?
                             } else {
                                 batch
                             };
-                            
                             row_offset += filtered_batch.num_rows() as u64;
                             yield filtered_batch;
                         }
@@ -146,22 +146,23 @@ impl<R: FileRead> ArrowFileReader<R> {
 
 impl<R: FileRead> AsyncFileReader for ArrowFileReader<R> {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
-        Box::pin(
-            self.r
-                .read(range.start..range.end)
-                .map_err(|err| {
-                    let err_msg = format!("{}", err);
-                    parquet::errors::ParquetError::External(err_msg.into())
-                }),
-        )
+        Box::pin(self.r.read(range.start..range.end).map_err(|err| {
+            let err_msg = format!("{}", err);
+            parquet::errors::ParquetError::External(err_msg.into())
+        }))
     }
 
-    fn get_metadata(&mut self, options: Option<&ArrowReaderOptions>) -> BoxFuture<parquet::errors::Result<Arc<ParquetMetaData>>> {
+    fn get_metadata(
+        &mut self,
+        options: Option<&ArrowReaderOptions>,
+    ) -> BoxFuture<parquet::errors::Result<Arc<ParquetMetaData>>> {
         Box::pin(async move {
             let file_size = self.meta.size;
-            let mut loader = MetadataLoader::load(self, file_size as usize, None).await?;
-            loader.load_page_index(false, false).await?;
-            Ok(Arc::new(loader.finish()))
+            Ok(Arc::new(
+                ParquetMetaDataReader::new()
+                    .load_and_finish(self, file_size)
+                    .await?,
+            ))
         })
     }
 }
@@ -175,7 +176,7 @@ impl ArrowReader {
     ) -> crate::Result<RecordBatch> {
         let num_rows = batch.num_rows();
         let mut keep_indices = Vec::with_capacity(num_rows);
-        
+
         // Build a list of row indices to keep (those not in deletion vector)
         for i in 0..num_rows {
             let global_row_pos = row_offset + i as u64;
@@ -183,43 +184,46 @@ impl ArrowReader {
                 keep_indices.push(i as u64);
             }
         }
-        
+
         // If all rows are kept, return the original batch
         if keep_indices.len() == num_rows {
             return Ok(batch);
         }
-        
+
         // If no rows are kept, return an empty batch with the same schema
         if keep_indices.is_empty() {
             return Ok(RecordBatch::new_empty(batch.schema()));
         }
-        
+
         // Filter the batch using the keep indices
         let indices = UInt64Array::from(keep_indices);
-        
+
         // Apply take operation to each column
         let mut filtered_columns = Vec::with_capacity(batch.num_columns());
         for col_idx in 0..batch.num_columns() {
             let column = batch.column(col_idx);
-            let filtered_column = arrow::compute::take(column, &indices, None)
-                .map_err(|e| crate::Error::DataInvalid {
+            let filtered_column = arrow::compute::take(column, &indices, None).map_err(|e| {
+                crate::Error::DataInvalid {
                     message: format!("Failed to filter column {}: {}", col_idx, e),
                     source: Some(Box::new(e)),
-                })?;
+                }
+            })?;
             filtered_columns.push(filtered_column);
         }
-        
-        let filtered_batch = RecordBatch::try_new(batch.schema(), filtered_columns)
-            .map_err(|e| crate::Error::DataInvalid {
-                message: format!("Failed to create filtered batch: {}", e),
-                source: Some(Box::new(e)),
+
+        let filtered_batch =
+            RecordBatch::try_new(batch.schema(), filtered_columns).map_err(|e| {
+                crate::Error::DataInvalid {
+                    message: format!("Failed to create filtered batch: {}", e),
+                    source: Some(Box::new(e)),
+                }
             })?;
-        
+
         Ok(filtered_batch)
     }
 
     /// Build a projection based on table_schema
-    /// 
+    ///
     /// Only reads columns that are defined in the table_schema, which automatically
     /// excludes internal columns like `_KEY_*`, `_SEQUENCE_NUMBER`, and `_VALUE_KIND`.
     fn build_projection_from_table_schema(
@@ -232,11 +236,11 @@ impl ArrowReader {
             .iter()
             .map(|f| f.name().as_ref())
             .collect();
-        
+
         // Get all field names from parquet schema
         let root_group = parquet_schema.root_schema();
         let mut column_names: Vec<&str> = Vec::new();
-        
+
         // Only include columns that exist in both parquet schema and table schema
         for field in root_group.get_fields() {
             let field_name = field.name();
@@ -244,20 +248,24 @@ impl ArrowReader {
                 column_names.push(field_name);
             }
         }
-        
+
         // If no matching columns found, return empty projection
         if column_names.is_empty() {
             return Some(ProjectionMask::columns(parquet_schema, Vec::<&str>::new()));
         }
-        
+
         // If all parquet columns are in table schema, return None to read all
         // (This is unlikely, but handle it for completeness)
-        let all_parquet_fields: Vec<&str> = root_group.get_fields().iter().map(|f| f.name()).collect();
-        if column_names.len() == all_parquet_fields.len() 
-            && column_names.iter().all(|name| all_parquet_fields.contains(name)) {
+        let all_parquet_fields: Vec<&str> =
+            root_group.get_fields().iter().map(|f| f.name()).collect();
+        if column_names.len() == all_parquet_fields.len()
+            && column_names
+                .iter()
+                .all(|name| all_parquet_fields.contains(name))
+        {
             return None;
         }
-        
+
         // Create projection mask with only the columns in table schema
         Some(ProjectionMask::columns(parquet_schema, column_names))
     }

@@ -1,8 +1,8 @@
-use arrow_schema::{Field, Schema, DataType as ArrowDataType, TimeUnit, Fields};
-use std::sync::Arc;
-use arrow_array::types::{validate_decimal_precision_and_scale, Decimal128Type};
 use crate::spec::{DataField, DataType, TableSchema};
 use crate::{Error, Result};
+use arrow_array::types::{validate_decimal_precision_and_scale, Decimal128Type};
+use arrow_schema::{DataType as ArrowDataType, Field, Fields, Schema, TimeUnit};
+use std::sync::Arc;
 pub const UTC_TIME_ZONE: &str = "+00:00";
 pub const DEFAULT_MAP_FIELD_NAME: &str = "key_value";
 
@@ -15,7 +15,7 @@ pub fn schema_to_arrow_schema(schema: &TableSchema) -> Result<Schema> {
 }
 
 /// Convert Paimon timestamp/time precision to Arrow TimeUnit.
-/// 
+///
 /// Precision mapping:
 /// - 0 -> Second (no fractional seconds)
 /// - 1-3 -> Millisecond (1-3 fractional digits)
@@ -30,8 +30,6 @@ fn precision_to_time_unit(precision: u32) -> TimeUnit {
         _ => TimeUnit::Nanosecond, // Default to nanosecond for invalid precision
     }
 }
-
-
 
 fn data_field_to_arrow_field(field: &DataField) -> Result<Field> {
     let name = field.name();
@@ -51,25 +49,23 @@ fn data_type_to_arrow_data_type(data_type: &DataType) -> Result<ArrowDataType> {
         DataType::Int(_) => ArrowDataType::Int32,
         DataType::BigInt(_) => ArrowDataType::Int64,
         DataType::Decimal(ty) => {
-            let precision: u8 = ty.precision().try_into().map_err(|_| {
-                Error::DataTypeInvalid {
+            let precision: u8 = ty
+                .precision()
+                .try_into()
+                .map_err(|_| Error::DataTypeInvalid {
                     message: "incompatible precision for decimal type convert".to_string(),
-                }
-            })?;
-            let scale: i8 = ty.scale().try_into().map_err(|_| {
-                Error::DataTypeInvalid {
-                    message: "incompatible scale for decimal type convert".to_string(),
-                }
+                })?;
+            let scale: i8 = ty.scale().try_into().map_err(|_| Error::DataTypeInvalid {
+                message: "incompatible scale for decimal type convert".to_string(),
             })?;
             validate_decimal_precision_and_scale::<Decimal128Type>(precision, scale).map_err(
-                |_| {
-                    Error::DataTypeInvalid {
-                        message: "incompatible precision and scale for decimal type convert".to_string(),
-                    }
+                |_| Error::DataTypeInvalid {
+                    message: "incompatible precision and scale for decimal type convert"
+                        .to_string(),
                 },
             )?;
             ArrowDataType::Decimal128(precision, scale)
-        },
+        }
         DataType::Double(_) => ArrowDataType::Float64,
         DataType::Float(_) => ArrowDataType::Float32,
         DataType::Binary(_) => ArrowDataType::Binary,
@@ -98,7 +94,11 @@ fn data_type_to_arrow_data_type(data_type: &DataType) -> Result<ArrowDataType> {
         }
         DataType::Array(ty) => {
             let element_data_type = data_type_to_arrow_data_type(ty.element_type())?;
-            let element_field = Field::new("element", element_data_type, ty.element_type().is_nullable());
+            let element_field = Field::new(
+                "element",
+                element_data_type,
+                ty.element_type().is_nullable(),
+            );
             ArrowDataType::List(Arc::new(element_field))
         }
         DataType::Map(ty) => {
@@ -108,12 +108,19 @@ fn data_type_to_arrow_data_type(data_type: &DataType) -> Result<ArrowDataType> {
             let key_field = Field::new("key", key_data_type, ty.key_type().is_nullable());
             let value_field = Field::new("value", value_data_type, ty.value_type().is_nullable());
             let entries_struct = ArrowDataType::Struct(Fields::from(vec![key_field, value_field]));
-            ArrowDataType::Map(Arc::new(Field::new(DEFAULT_MAP_FIELD_NAME, entries_struct, false)), false)
+            ArrowDataType::Map(
+                Arc::new(Field::new(DEFAULT_MAP_FIELD_NAME, entries_struct, false)),
+                false,
+            )
         }
         DataType::Multiset(ty) => {
             // Multiset is represented as a List in Arrow
             let element_data_type = data_type_to_arrow_data_type(ty.element_type())?;
-            let element_field = Field::new("element", element_data_type, ty.element_type().is_nullable());
+            let element_field = Field::new(
+                "element",
+                element_data_type,
+                ty.element_type().is_nullable(),
+            );
             ArrowDataType::List(Arc::new(element_field))
         }
         DataType::Row(ty) => {
@@ -129,6 +136,6 @@ fn data_type_to_arrow_data_type(data_type: &DataType) -> Result<ArrowDataType> {
             ArrowDataType::Struct(Fields::from(fields))
         }
     };
-    
+
     Ok(arrow_data_type)
 }

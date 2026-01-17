@@ -21,11 +21,11 @@ use crate::catalog::Identifier;
 use crate::io::FileIO;
 use crate::scan::TableScanBuilder;
 use crate::spec::{Snapshot, SnapshotRef, TableSchema};
-use std::path::PathBuf;
-use futures::TryFutureExt;
-use typed_builder::TypedBuilder;
 use crate::Error;
 use crate::Result;
+use futures::TryFutureExt;
+use std::path::PathBuf;
+use typed_builder::TypedBuilder;
 
 /// Table represents a table in the catalog.
 #[derive(TypedBuilder, Debug, Clone)]
@@ -48,7 +48,7 @@ impl Table {
     pub fn path(&self) -> &String {
         &self.path
     }
-    
+
     pub fn table_schema(&self) -> &TableSchema {
         &self.table_schema
     }
@@ -86,16 +86,18 @@ impl Table {
     pub async fn current_snapshot(&self) -> Result<Option<Snapshot>> {
         // todo: real latest should consider if LATEST hint doesn't exist
         let snapshot_latest_hint_path = PathBuf::from(&self.path).join("snapshot").join("LATEST");
-        let snapshot_latest_hint_file = self.file_io.new_input(&snapshot_latest_hint_path.to_string_lossy())?;
+        let snapshot_latest_hint_file = self
+            .file_io
+            .new_input(&snapshot_latest_hint_path.to_string_lossy())?;
         if !snapshot_latest_hint_file.exists().await? {
             return Err(Error::DataInvalid {
                 message: "latest snapsot doesn't exist".to_string(),
                 source: None,
-            })
+            });
         }
 
         let content = snapshot_latest_hint_file.read().await?.to_vec();
-        
+
         if let Ok(snapshot_id_str) = String::from_utf8(content.clone()) {
             if let Ok(snapshot_id) = snapshot_id_str.trim().parse::<i64>() {
                 // LATEST contains snapshot ID, read the actual snapshot file
@@ -106,17 +108,16 @@ impl Table {
                         message: format!("Failed to read snapshot with ID {}", snapshot_id),
                         source: None,
                     })
-                }
+                };
             }
         }
-        
+
         // Try to parse as full snapshot JSON
-        let snapshot: Snapshot = serde_json::from_slice(&content).map_err(|e| {
-            Error::DataInvalid {
+        let snapshot: Snapshot =
+            serde_json::from_slice(&content).map_err(|e| Error::DataInvalid {
                 message: "Fail to parse snapshot".to_string(),
                 source: Some(Box::new(e)),
-            }
-        })?;
+            })?;
         Ok(Some(snapshot))
     }
 

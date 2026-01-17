@@ -19,10 +19,10 @@ mod error;
 pub use error::Error;
 pub use error::Result;
 
+pub mod arrow;
 pub mod catalog;
 pub mod deletion_vector;
 pub mod file_index;
 pub mod io;
 pub mod scan;
 pub mod spec;
-pub mod arrow;

@@ -161,8 +161,7 @@ impl ArrayType {
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED | DataTypeFamily::COLLECTION
     }
-    
-    
+
     pub fn element_type(&self) -> &DataType {
         &self.element_type
     }
@@ -1279,11 +1278,11 @@ impl MapType {
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED | DataTypeFamily::COLLECTION
     }
-    
+
     pub fn key_type(&self) -> &DataType {
         &self.key_type
     }
-    
+
     pub fn value_type(&self) -> &DataType {
         &self.value_type
     }
@@ -1320,7 +1319,7 @@ impl MultisetType {
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED | DataTypeFamily::COLLECTION
     }
-    
+
     pub fn element_type(&self) -> &DataType {
         &self.element_type
     }
@@ -1355,7 +1354,7 @@ impl RowType {
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED
     }
-    
+
     pub fn fields(&self) -> &[DataField] {
         &self.fields
     }

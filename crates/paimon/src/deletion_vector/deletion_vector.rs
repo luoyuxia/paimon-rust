@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use bytes::Buf;
 use roaring::RoaringBitmap;
 use std::sync::Arc;
-use bytes::Buf;
 
 /// DeletionVector represents a set of row positions that have been deleted.
 /// Uses RoaringBitmap for efficient storage, similar to Java's BitmapDeletionVector.
@@ -75,7 +75,7 @@ impl DeletionVector {
     }
 
     /// Read a DeletionVector from bytes, similar to Java DeletionVector.read(DataInputStream, length)
-    /// 
+    ///
     /// Format (as read by DeletionVector.read):
     /// - bitmapLength (4 bytes int): total size including magic
     /// - magicNumber (4 bytes int): BitmapDeletionVector.MAGIC_NUMBER
@@ -83,28 +83,31 @@ impl DeletionVector {
     /// - CRC (4 bytes): checksum (skipped during read)
     pub fn read_from_bytes(bytes: &[u8], expected_length: Option<u64>) -> crate::Result<Self> {
         use bytes::Buf;
-        
+
         if bytes.len() < 8 {
             return Err(crate::Error::DataInvalid {
                 message: "Deletion vector data too short".to_string(),
                 source: None,
             });
         }
-        
+
         let mut buf = bytes;
-        
+
         // Read bitmapLength (total size including magic)
         let bitmap_length = buf.get_i32() as usize;
-        
+
         // Read magic number
         let magic_number = buf.get_i32() as u32;
         if magic_number != MAGIC_NUMBER {
             return Err(crate::Error::DataInvalid {
-                message: format!("Invalid magic number: expected {}, got {}", MAGIC_NUMBER, magic_number),
+                message: format!(
+                    "Invalid magic number: expected {}, got {}",
+                    MAGIC_NUMBER, magic_number
+                ),
                 source: None,
             });
         }
-        
+
         // Verify length if provided
         if let Some(expected) = expected_length {
             if bitmap_length as u64 != expected {
@@ -117,38 +120,40 @@ impl DeletionVector {
                 });
             }
         }
-        
+
         // Read bitmap data (bitmapLength - 4 bytes, since magic is already included in bitmapLength)
         let bitmap_data_size = bitmap_length - MAGIC_NUMBER_SIZE_BYTES;
-        
+
         // 4(bitmap_length) + 4(magic_number) + bitmap_data_size + 4(crc)
         if bytes.len() < 8 + bitmap_data_size + 4 {
             return Err(crate::Error::DataInvalid {
                 message: format!(
                     "Deletion vector data incomplete: need {} bytes, got {}",
-                    8 + bitmap_data_size + 4, bytes.len()
+                    8 + bitmap_data_size + 4,
+                    bytes.len()
                 ),
                 source: None,
             });
         }
-        
+
         let bitmap_data = &bytes[8..8 + bitmap_data_size];
-        
+
         // Skip CRC (4 bytes) - Java code does: dis.skipBytes(4)
         // We don't need to verify it here as it's skipped
-        
+
         // Deserialize RoaringBitmap
-        let bitmap = RoaringBitmap::deserialize_from(bitmap_data)
-            .map_err(|e| crate::Error::DataInvalid {
+        let bitmap = RoaringBitmap::deserialize_from(bitmap_data).map_err(|e| {
+            crate::Error::DataInvalid {
                 message: format!("Failed to deserialize RoaringBitmap: {}", e),
                 source: Some(Box::new(e)),
-            })?;
-        
+            }
+        })?;
+
         Ok(Self::from_bitmap(bitmap))
     }
 
     /// Deserialize a DeletionVector from bytes
-    /// 
+    ///
     /// Format (same as Java BitmapDeletionVector.serializeTo):
     /// - Size (4 bytes): total size of data block (magic + bitmap serialized)
     /// - Magic number (4 bytes): 1581511376
@@ -157,7 +162,7 @@ impl DeletionVector {
     pub fn deserialize_from_bytes(bytes: &[u8]) -> crate::Result<Self> {
         use bytes::Buf;
         use crc32fast::Hasher;
-        
+
         if bytes.len() < 4 + MAGIC_NUMBER_SIZE_BYTES + 4 {
             return Err(crate::Error::DataInvalid {
                 message: "Deletion vector data too short".to_string(),
@@ -166,14 +171,17 @@ impl DeletionVector {
         }
 
         let mut buf = bytes;
-        
+
         // Read size (total size of data block: magic + bitmap)
         let size = buf.get_u32_le() as usize;
-        
+
         if bytes.len() < 4 + size + 4 {
             return Err(crate::Error::DataInvalid {
-                message: format!("Deletion vector data incomplete: expected {} bytes, got {}", 
-                    4 + size + 4, bytes.len()),
+                message: format!(
+                    "Deletion vector data incomplete: expected {} bytes, got {}",
+                    4 + size + 4,
+                    bytes.len()
+                ),
                 source: None,
             });
         }
@@ -182,34 +190,42 @@ impl DeletionVector {
         let magic = buf.get_u32_le();
         if magic != MAGIC_NUMBER {
             return Err(crate::Error::DataInvalid {
-                message: format!("Invalid magic number: expected {}, got {}", MAGIC_NUMBER, magic),
+                message: format!(
+                    "Invalid magic number: expected {}, got {}",
+                    MAGIC_NUMBER, magic
+                ),
                 source: None,
             });
         }
 
         // Read serialized bitmap data (size includes magic, so bitmap data is size - 4)
         let bitmap_data_size = size - MAGIC_NUMBER_SIZE_BYTES;
-        let bitmap_data = &bytes[4 + MAGIC_NUMBER_SIZE_BYTES..4 + MAGIC_NUMBER_SIZE_BYTES + bitmap_data_size];
-        
+        let bitmap_data =
+            &bytes[4 + MAGIC_NUMBER_SIZE_BYTES..4 + MAGIC_NUMBER_SIZE_BYTES + bitmap_data_size];
+
         // Read and verify checksum (checksum covers: size + magic + bitmap)
         let expected_checksum = buf.get_u32_le();
         let mut hasher = Hasher::new();
         hasher.update(&bytes[0..4 + size]); // Checksum covers size (4 bytes) + data block (size bytes)
         let actual_checksum = hasher.finalize() as u32;
-        
+
         if expected_checksum != actual_checksum {
             return Err(crate::Error::DataInvalid {
-                message: format!("Checksum mismatch: expected {}, got {}", expected_checksum, actual_checksum),
+                message: format!(
+                    "Checksum mismatch: expected {}, got {}",
+                    expected_checksum, actual_checksum
+                ),
                 source: None,
             });
         }
 
         // Deserialize RoaringBitmap
-        let bitmap = RoaringBitmap::deserialize_from(bitmap_data)
-            .map_err(|e| crate::Error::DataInvalid {
+        let bitmap = RoaringBitmap::deserialize_from(bitmap_data).map_err(|e| {
+            crate::Error::DataInvalid {
                 message: format!("Failed to deserialize RoaringBitmap: {}", e),
                 source: Some(Box::new(e)),
-            })?;
+            }
+        })?;
 
         Ok(Self::from_bitmap(bitmap))
     }
@@ -220,4 +236,3 @@ impl Default for DeletionVector {
         Self::empty()
     }
 }
-

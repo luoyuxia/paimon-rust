@@ -123,7 +123,11 @@ impl TableScan {
         let mut manifest_file_paths = Vec::new();
 
         // Read base manifest list
-        let base_manifest_list_path = table_path.join("manifest").join(self.snapshot.base_manifest_list()).to_string_lossy().to_string();
+        let base_manifest_list_path = table_path
+            .join("manifest")
+            .join(self.snapshot.base_manifest_list())
+            .to_string_lossy()
+            .to_string();
         let base_manifest_list_content = self.read_file(base_manifest_list_path.as_str()).await?;
         let base_manifest_files: Vec<ManifestFileMeta> =
             from_avro_bytes(&base_manifest_list_content)?;
@@ -133,7 +137,11 @@ impl TableScan {
 
         // Read delta manifest list
         // Manifest list files are stored directly in the table directory
-        let delta_manifest_list_path = table_path.join("manifest").join(self.snapshot.delta_manifest_list()).to_string_lossy().to_string();
+        let delta_manifest_list_path = table_path
+            .join("manifest")
+            .join(self.snapshot.delta_manifest_list())
+            .to_string_lossy()
+            .to_string();
         let delta_manifest_list_content = self.read_file(&delta_manifest_list_path).await?;
         let delta_manifest_files: Vec<ManifestFileMeta> =
             from_avro_bytes(&delta_manifest_list_content)?;
@@ -146,20 +154,29 @@ impl TableScan {
         // - Add entries: add the data file
         // - Delete entries: remove the data file (by matching file name)
         let mut data_file_metas: Vec<(DataFileMeta, i32, Vec<u8>)> = Vec::new();
-        let mut deleted_data_files: std::collections::HashSet<String> = std::collections::HashSet::new();
-        
+        let mut deleted_data_files: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
         for manifest_meta in manifest_file_paths {
-            let manifest_path = table_path.join("manifest").join(manifest_meta.file_name()).to_string_lossy().to_string();
+            let manifest_path = table_path
+                .join("manifest")
+                .join(manifest_meta.file_name())
+                .to_string_lossy()
+                .to_string();
             let entries = Manifest::read(&self.file_io, &manifest_path).await?;
             for entry in entries {
                 // if is pk table and level is 0, continue to ignore level 0
-                if !self.table_schema.primary_keys().is_empty() && entry.file().level != 0 { 
+                if !self.table_schema.primary_keys().is_empty() && entry.file().level != 0 {
                     continue;
                 }
                 match entry.kind() {
                     FileKind::Add => {
                         let data_file_meta = entry.file().clone();
-                        data_file_metas.push((data_file_meta, entry.bucket(), entry.partition().to_vec()));
+                        data_file_metas.push((
+                            data_file_meta,
+                            entry.bucket(),
+                            entry.partition().to_vec(),
+                        ));
                     }
                     FileKind::Delete => {
                         // Mark this data file as deleted by file name
@@ -168,24 +185,29 @@ impl TableScan {
                 }
             }
         }
-        
+
         // Remove any data files that were deleted
-        data_file_metas.retain(|(meta, _bucket, _partition)| {
-            !deleted_data_files.contains(&meta.file_name)
-        });
+        data_file_metas
+            .retain(|(meta, _bucket, _partition)| !deleted_data_files.contains(&meta.file_name));
 
         // Read index manifest to get deletion vectors
         // Need to handle both Add and Delete entries:
         // - Add entries: add the index file
         // - Delete entries: remove the index file (by matching file name)
         let mut deletion_files: Vec<IndexManifestEntry> = Vec::new();
-        let mut deleted_index_files: std::collections::HashSet<String> = std::collections::HashSet::new();
-        
+        let mut deleted_index_files: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
         if let Some(index_manifest_path) = self.snapshot.index_manifest() {
-            let index_manifest_full_path = table_path.join("manifest").join(index_manifest_path).to_string_lossy().to_string();
+            let index_manifest_full_path = table_path
+                .join("manifest")
+                .join(index_manifest_path)
+                .to_string_lossy()
+                .to_string();
             let index_manifest_content = self.read_file(&index_manifest_full_path).await?;
             if !index_manifest_content.is_empty() {
-                let index_entries: Vec<IndexManifestEntry> = from_avro_bytes(&index_manifest_content)?;
+                let index_entries: Vec<IndexManifestEntry> =
+                    from_avro_bytes(&index_manifest_content)?;
                 for entry in index_entries {
                     if entry.index_file.index_type == "DELETION_VECTORS" {
                         match entry.kind {
@@ -201,18 +223,26 @@ impl TableScan {
                 }
             }
         }
-        
+
         // Remove any index files that were deleted
         deletion_files.retain(|entry| !deleted_index_files.contains(&entry.index_file.file_name));
 
         // Create deletion vector factory
-        let data_files_for_factory: Vec<DataFileMeta> = data_file_metas.iter().map(|(meta, _, _)| (*meta).clone()).collect();
+        let data_files_for_factory: Vec<DataFileMeta> = data_file_metas
+            .iter()
+            .map(|(meta, _, _)| (*meta).clone())
+            .collect();
         let dv_factory = DeletionVectorFactory::create(
             self.file_io.clone(),
             &data_files_for_factory,
-            if deletion_files.is_empty() { None } else { Some(&deletion_files) },
+            if deletion_files.is_empty() {
+                None
+            } else {
+                Some(&deletion_files)
+            },
             &self.table_path,
-        ).await?;
+        )
+        .await?;
 
         // Create FileScanTask with deletion vectors
         let mut file_scan_tasks = Vec::new();
@@ -223,12 +253,12 @@ impl TableScan {
                 .join(&data_file_meta.file_name)
                 .to_string_lossy()
                 .to_string();
-            
+
             let deletion_vector = dv_factory.get_deletion_vector(&data_file_meta.file_name);
-            
+
             file_scan_tasks.push(FileScanTask {
                 data_file_path,
-                start: 0, // Start from beginning of file
+                start: 0,                                // Start from beginning of file
                 length: data_file_meta.file_size as u64, // Full file size
                 data_file_name: data_file_meta.file_name.clone(),
                 deletion_vector,
@@ -240,8 +270,8 @@ impl TableScan {
     }
 
     pub async fn to_arrow(&self) -> crate::Result<ArrowRecordBatchStream> {
-        let mut arrow_reader_builder = ArrowReaderBuilder::new(self.file_io.clone(),
-        self.table_schema.clone());
+        let mut arrow_reader_builder =
+            ArrowReaderBuilder::new(self.file_io.clone(), self.table_schema.clone());
         if let Some(batch_size) = self.batch_size {
             arrow_reader_builder = arrow_reader_builder.with_batch_size(batch_size);
         }
@@ -279,7 +309,9 @@ impl FileScanTask {
     }
 
     /// Returns the deletion vector if available
-    pub fn deletion_vector(&self) -> Option<&std::sync::Arc<crate::deletion_vector::DeletionVector>> {
+    pub fn deletion_vector(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::deletion_vector::DeletionVector>> {
         self.deletion_vector.as_ref()
     }
 

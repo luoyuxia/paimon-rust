@@ -51,7 +51,7 @@ impl DeletionVectorFactory {
         table_path: &str,
     ) -> Result<Self> {
         let mut factory = Self::new(file_io.clone());
-        
+
         // If no deletion files, return empty factory
         let deletion_files = match deletion_files {
             Some(files) => files,
@@ -59,11 +59,15 @@ impl DeletionVectorFactory {
         };
 
         // Group deletion files by bucket and partition
-        let mut deletion_files_by_bucket: HashMap<(Vec<u8>, i32), Vec<&IndexManifestEntry>> = HashMap::new();
+        let mut deletion_files_by_bucket: HashMap<(Vec<u8>, i32), Vec<&IndexManifestEntry>> =
+            HashMap::new();
         for entry in deletion_files {
             if entry.index_file.index_type == "DELETION_VECTORS" {
                 let key = (entry.partition.clone(), entry.bucket);
-                deletion_files_by_bucket.entry(key).or_insert_with(Vec::new).push(entry);
+                deletion_files_by_bucket
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .push(entry);
             }
         }
 
@@ -73,24 +77,23 @@ impl DeletionVectorFactory {
                 if let Some(ranges) = &entry.index_file.deletion_vectors_ranges {
                     // Read the deletion vector index file
                     // Path: table_path/index/index_file_name
-                    let index_file_path = format!("{}/index/{}", table_path, entry.index_file.file_name);
+                    let index_file_path =
+                        format!("{}/index/{}", table_path, entry.index_file.file_name);
                     let index_file = factory.file_io.new_input(&index_file_path)?;
-                    
+
                     if index_file.exists().await? {
                         // Read all deletion vectors from this index file
                         // Similar to DeletionVectorsIndexFile.readAllDeletionVectors
-                        let deletion_vectors = factory.read_all_deletion_vectors(
-                            &index_file,
-                            ranges,
-                        ).await?;
-                        
+                        let deletion_vectors = factory
+                            .read_all_deletion_vectors(&index_file, ranges)
+                            .await?;
+
                         // Add to factory
                         for (data_file_name, deletion_vector) in deletion_vectors {
                             if data_files.iter().any(|f| f.file_name == data_file_name) {
-                                factory.deletion_vectors.insert(
-                                    data_file_name,
-                                    Arc::new(deletion_vector),
-                                );
+                                factory
+                                    .deletion_vectors
+                                    .insert(data_file_name, Arc::new(deletion_vector));
                             }
                         }
                     }
@@ -102,11 +105,11 @@ impl DeletionVectorFactory {
     }
 
     /// Read all deletion vectors from an index file
-    /// 
+    ///
     /// Similar to DeletionVectorsIndexFile.readAllDeletionVectors:
     /// 1. Check version (first byte should be VERSION_ID_V1 = 1)
     /// 2. For each range in deletion_vectors_ranges, read the deletion vector
-    /// 
+    ///
     /// Format:
     /// - Version (1 byte): VERSION_ID_V1 = 1
     /// - For each deletion vector (in order of ranges):
@@ -119,13 +122,13 @@ impl DeletionVectorFactory {
         index_file: &crate::io::InputFile,
         ranges: &indexmap::IndexMap<String, (i32, i32)>,
     ) -> Result<std::collections::HashMap<String, DeletionVector>> {
-        use bytes::Buf;
         use crate::io::FileRead;
-        
+        use bytes::Buf;
+
         let reader = index_file.reader().await?;
         let metadata = index_file.metadata().await?;
         let mut all_data = reader.read(0..metadata.size).await?;
-        
+
         // // Check version (first byte should be VERSION_ID_V1 = 1)
         // const VERSION_ID_V1: u8 = 1;
         // if all_data.len() < 1 {
@@ -134,7 +137,7 @@ impl DeletionVectorFactory {
         //         source: None,
         //     });
         // }
-        // 
+        //
         // // let version = all_data.get_u8();
         // // if version != VERSION_ID_V1 {
         // //     return Err(crate::Error::DataInvalid {
@@ -142,13 +145,13 @@ impl DeletionVectorFactory {
         // //         source: None,
         // //     });
         // // }
-        
+
         let mut deletion_vectors = std::collections::HashMap::new();
-        
+
         // Read deletion vectors in the order specified by ranges
         for (data_file_name, (offset, length)) in ranges {
             let start_pos = *offset as usize;
-            
+
             // if all_data.len() < end_pos {
             //     return Err(crate::Error::DataInvalid {
             //         message: format!(
@@ -158,16 +161,16 @@ impl DeletionVectorFactory {
             //         source: None,
             //     });
             // }
-            
+
             // Extract the deletion vector data
             let dv_data = &all_data[start_pos..];
-            
+
             // Parse using DeletionVector.read format
             let deletion_vector = DeletionVector::read_from_bytes(dv_data, Some(*length as u64))?;
-            
+
             deletion_vectors.insert(data_file_name.clone(), deletion_vector);
         }
-        
+
         Ok(deletion_vectors)
     }
 
@@ -184,4 +187,3 @@ impl DeletionVectorFactory {
             .unwrap_or(false)
     }
 }
-

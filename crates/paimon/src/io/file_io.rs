@@ -105,8 +105,7 @@ impl FileIO {
         let mut statuses = Vec::new();
 
         for entry in entries {
-            let meta = op.stat(entry.path())
-                .await?;
+            let meta = op.stat(entry.path()).await?;
             statuses.push(FileStatus {
                 size: meta.content_length(),
                 is_dir: meta.is_dir(),

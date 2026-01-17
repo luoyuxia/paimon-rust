@@ -6,36 +6,25 @@ use paimon::catalog::{Catalog, FileSystemCatalog, Identifier};
 use paimon::io::FileIOBuilder;
 use paimon::Result;
 
-
 #[tokio::main]
 async fn main() -> Result<()> {
-
     let warehouse_path = "/Users/yuxia/Projects/fluss-demo/paimon-warehouse";
-    let file_io = FileIOBuilder::new("file")
-        .build()?;
-    let catalog = FileSystemCatalog::new(
-        warehouse_path,
-        file_io
-    );
-    
+    let file_io = FileIOBuilder::new("file").build()?;
+    let catalog = FileSystemCatalog::new(warehouse_path, file_io);
+
     let table_id = Identifier::new("default", "T");
-    
-    let table = catalog.get_table(
-        &table_id
-    ).await?;
-    
-    
-    let scan = table
-        .scan()
-        .build().await?;
-    
+
+    let table = catalog.get_table(&table_id).await?;
+
+    let scan = table.scan().build().await?;
+
     let arrow_batch = scan.to_arrow().await?;
-    
+
     let batches: Vec<_> = arrow_batch.try_collect().await?;
-    
+
     for batch in batches {
         println!("{:?}", batch);
     }
-    
+
     Ok(())
 }
