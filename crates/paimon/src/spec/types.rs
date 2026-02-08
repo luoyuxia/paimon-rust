@@ -1506,29 +1506,22 @@ mod serde_utils {
     ) -> crate::Result<(usize, usize), Error> {
         let Some(open_bracket) = s.find('(') else {
             return Err(Error::DataTypeInvalid {
-                message: format!(
-                    "Invalid {} specification. Missing opening bracket.",
-                    type_name
-                )
-                .to_string(),
+                message: format!("Invalid {type_name} specification. Missing opening bracket.")
+                    .to_string(),
             });
         };
         let Some(close_bracket) = s.find(')') else {
             return Err(Error::DataTypeInvalid {
-                message: format!(
-                    "Invalid {} specification. Missing closing bracket.",
-                    type_name
-                )
-                .to_string(),
+                message: format!("Invalid {type_name} specification. Missing closing bracket.")
+                    .to_string(),
             });
         };
 
         if open_bracket >= close_bracket {
             return Err(Error::DataTypeInvalid {
                 message: format!(
-                    "Invalid {} specification. Opening bracket \
-                appears after or at the same position as closing bracket.",
-                    type_name
+                    "Invalid {type_name} specification. Opening bracket \
+                appears after or at the same position as closing bracket."
                 )
                 .to_string(),
             });
