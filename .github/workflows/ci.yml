@@ -18,12 +18,8 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  push: {}      # 任意分支 push 都跑（含 fork 上的 feature 分支）
+  pull_request: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
