@@ -124,7 +124,7 @@ pub struct Schema {
 
 impl Schema {
     /// Build a schema with validation. Normalizes partition/primary keys from options if present.
-    pub fn new(
+    fn new(
         fields: Vec<DataField>,
         partition_keys: Vec<String>,
         primary_keys: Vec<String>,
