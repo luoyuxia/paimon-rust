@@ -230,7 +230,7 @@ impl FileIndex {
             Ok(result)
         } else {
             Err(Error::FileIndexFormatInvalid {
-                message: format!("Column '{}' not found in header", column_name),
+                message: format!("Column '{column_name}' not found in header"),
             })
         }
     }
@@ -292,7 +292,7 @@ impl FileIndexFormatReader {
         let magic = buffer.get_u64_le();
         if magic != MAGIC {
             return Err(Error::FileIndexFormatInvalid {
-                message: format!("Expected MAGIC: {}, but found: {}", MAGIC, magic),
+                message: format!("Expected MAGIC: {MAGIC}, but found: {magic}"),
             });
         }
 
@@ -339,7 +339,7 @@ impl FileIndexFormatReader {
             // Column Name (variable-length UTF-8 string)
             let column_name = String::from_utf8(buffer.split_to(column_name_len as usize).to_vec())
                 .map_err(|e| Error::FileIndexFormatInvalid {
-                    message: format!("Invalid UTF-8 sequence in column name: {}", e),
+                    message: format!("Invalid UTF-8 sequence in column name: {e}"),
                 })?;
             current_offset += column_name_len as u64;
 
@@ -430,11 +430,11 @@ mod file_index_format_tests {
 
         let mut indexes = HashMap::new();
         for col_num in 1..5 {
-            let column_name = format!("column{}", col_num);
+            let column_name = format!("column{col_num}");
             let mut index_map = HashMap::new();
             for idx_num in 1..5 {
                 index_map.insert(
-                    format!("index{}", idx_num),
+                    format!("index{idx_num}"),
                     random_bytes(100 + col_num * idx_num),
                 );
             }

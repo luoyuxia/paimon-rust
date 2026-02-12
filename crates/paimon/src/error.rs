@@ -40,7 +40,8 @@ pub enum Error {
     )]
     IoUnexpected {
         message: String,
-        source: opendal::Error,
+        #[snafu(source(from(opendal::Error, Box::new)))]
+        source: Box<opendal::Error>,
     },
     #[snafu(
         visibility(pub(crate)),
@@ -58,7 +59,7 @@ pub enum Error {
     )]
     DataUnexpected {
         message: String,
-        source: apache_avro::Error,
+        source: Box<apache_avro::Error>,
     },
     #[snafu(
         visibility(pub(crate)),
@@ -72,7 +73,7 @@ impl From<opendal::Error> for Error {
         // TODO: Simple use IoUnexpected for now
         Error::IoUnexpected {
             message: "IO operation failed on underlying storage".to_string(),
-            source,
+            source: Box::new(source),
         }
     }
 }
@@ -81,7 +82,7 @@ impl From<apache_avro::Error> for Error {
     fn from(source: apache_avro::Error) -> Self {
         Error::DataUnexpected {
             message: "".to_string(),
-            source,
+            source: Box::new(source),
         }
     }
 }

@@ -28,6 +28,7 @@ pub enum FileKind {
 
 /// The Source of a file.
 /// Impl References: <https://github.com/apache/paimon/blob/release-0.8.2/paimon-core/src/main/java/org/apache/paimon/manifest/FileSource.java>
+#[allow(dead_code)] // Part of spec; used when file source is needed.
 #[derive(PartialEq, Eq, Debug, Clone, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum FileSource {
