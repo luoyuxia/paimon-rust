@@ -39,7 +39,7 @@ impl FileIO {
     /// The input HashMap is paimon-java's [`Options`](https://github.com/apache/paimon/blob/release-0.8.2/paimon-common/src/main/java/org/apache/paimon/options/Options.java#L60)
     pub fn from_url(path: &str) -> crate::Result<FileIOBuilder> {
         let url = Url::parse(path).map_err(|_| Error::ConfigInvalid {
-            message: format!("Invalid URL: {}", path),
+            message: format!("Invalid URL: {path}"),
         })?;
 
         Ok(FileIOBuilder::new(url.scheme()))
@@ -79,7 +79,7 @@ impl FileIO {
     pub async fn get_status(&self, path: &str) -> Result<FileStatus> {
         let (op, relative_path) = self.storage.create(path)?;
         let meta = op.stat(relative_path).await.context(IoUnexpectedSnafu {
-            message: format!("Failed to get file status for '{}'", path),
+            message: format!("Failed to get file status for '{path}'"),
         })?;
 
         Ok(FileStatus {
@@ -99,7 +99,7 @@ impl FileIO {
         let (op, relative_path) = self.storage.create(path)?;
 
         let entries = op.list(relative_path).await.context(IoUnexpectedSnafu {
-            message: format!("Failed to list files in '{}'", path),
+            message: format!("Failed to list files in '{path}'"),
         })?;
 
         let mut statuses = Vec::new();
@@ -124,7 +124,7 @@ impl FileIO {
         let (op, relative_path) = self.storage.create(path)?;
 
         op.is_exist(relative_path).await.context(IoUnexpectedSnafu {
-            message: format!("Failed to check existence of '{}'", path),
+            message: format!("Failed to check existence of '{path}'"),
         })
     }
 
@@ -135,7 +135,7 @@ impl FileIO {
         let (op, relative_path) = self.storage.create(path)?;
 
         op.delete(relative_path).await.context(IoUnexpectedSnafu {
-            message: format!("Failed to delete file '{}'", path),
+            message: format!("Failed to delete file '{path}'"),
         })?;
 
         Ok(())
@@ -150,7 +150,7 @@ impl FileIO {
         op.remove_all(relative_path)
             .await
             .context(IoUnexpectedSnafu {
-                message: format!("Failed to delete directory '{}'", path),
+                message: format!("Failed to delete directory '{path}'"),
             })?;
 
         Ok(())
@@ -167,7 +167,7 @@ impl FileIO {
         op.create_dir(relative_path)
             .await
             .context(IoUnexpectedSnafu {
-                message: format!("Failed to create directory '{}'", path),
+                message: format!("Failed to create directory '{path}'"),
             })?;
 
         Ok(())
@@ -184,7 +184,7 @@ impl FileIO {
             .rename(relative_path_src, relative_path_dst)
             .await
             .context(IoUnexpectedSnafu {
-                message: format!("Failed to rename '{}' to '{}'", src, dst),
+                message: format!("Failed to rename '{src}' to '{dst}'"),
             })?;
 
         Ok(())

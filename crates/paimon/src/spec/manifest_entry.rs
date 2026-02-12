@@ -17,8 +17,7 @@
 
 use crate::spec::manifest_common::FileKind;
 use crate::spec::DataFileMeta;
-use serde::Deserialize;
-use serde_with::serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data file.
 ///
