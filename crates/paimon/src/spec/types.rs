@@ -103,9 +103,22 @@ pub enum DataType {
     Row(RowType),
 }
 
-#[allow(dead_code)]
 impl DataType {
-    fn is_nullable(&self) -> bool {
+    /// Returns whether this type is or contains (recursively) a [`RowType`].
+    /// Used to reject schema columns that would require field ID assignment for nested row fields,
+    /// which is not yet implemented (see <https://github.com/apache/paimon/pull/1547>).
+    pub fn contains_row_type(&self) -> bool {
+        match self {
+            DataType::Row(_) => true,
+            DataType::Array(v) => v.element_type.contains_row_type(),
+            DataType::Map(v) => v.key_type.contains_row_type() || v.value_type.contains_row_type(),
+            DataType::Multiset(v) => v.element_type.contains_row_type(),
+            _ => false,
+        }
+    }
+
+    /// Returns whether this type is nullable.
+    pub fn is_nullable(&self) -> bool {
         match self {
             DataType::Boolean(v) => v.nullable,
             DataType::TinyInt(v) => v.nullable,
@@ -128,6 +141,59 @@ impl DataType {
             DataType::Multiset(v) => v.nullable,
             DataType::Row(v) => v.nullable,
         }
+    }
+
+    /// Returns a copy of this type with the given nullability (top-level only).
+    /// Corresponds to Java `DataType.copy(boolean nullable)`.
+    pub fn copy_with_nullable(&self, nullable: bool) -> Result<Self> {
+        Ok(match self {
+            DataType::Boolean(_) => DataType::Boolean(BooleanType::with_nullable(nullable)),
+            DataType::TinyInt(_) => DataType::TinyInt(TinyIntType::with_nullable(nullable)),
+            DataType::SmallInt(_) => DataType::SmallInt(SmallIntType::with_nullable(nullable)),
+            DataType::Int(_) => DataType::Int(IntType::with_nullable(nullable)),
+            DataType::BigInt(_) => DataType::BigInt(BigIntType::with_nullable(nullable)),
+            DataType::Decimal(v) => DataType::Decimal(DecimalType::with_nullable(
+                nullable,
+                v.precision(),
+                v.scale(),
+            )?),
+            DataType::Double(_) => DataType::Double(DoubleType::with_nullable(nullable)),
+            DataType::Float(_) => DataType::Float(FloatType::with_nullable(nullable)),
+            DataType::Binary(v) => {
+                DataType::Binary(BinaryType::with_nullable(nullable, v.length())?)
+            }
+            DataType::VarBinary(v) => {
+                DataType::VarBinary(VarBinaryType::try_new(nullable, v.length())?)
+            }
+            DataType::Char(v) => DataType::Char(CharType::with_nullable(nullable, v.length())?),
+            DataType::VarChar(v) => {
+                DataType::VarChar(VarCharType::with_nullable(nullable, v.length())?)
+            }
+            DataType::Date(_) => DataType::Date(DateType::with_nullable(nullable)),
+            DataType::LocalZonedTimestamp(v) => DataType::LocalZonedTimestamp(
+                LocalZonedTimestampType::with_nullable(nullable, v.precision())?,
+            ),
+            DataType::Time(v) => DataType::Time(TimeType::with_nullable(nullable, v.precision())?),
+            DataType::Timestamp(v) => {
+                DataType::Timestamp(TimestampType::with_nullable(nullable, v.precision())?)
+            }
+            DataType::Array(v) => DataType::Array(ArrayType::with_nullable(
+                nullable,
+                v.element_type.as_ref().clone(),
+            )),
+            DataType::Map(v) => DataType::Map(MapType::with_nullable(
+                nullable,
+                v.key_type.as_ref().clone(),
+                v.value_type.as_ref().clone(),
+            )),
+            DataType::Multiset(v) => DataType::Multiset(MultisetType::with_nullable(
+                nullable,
+                v.element_type.as_ref().clone(),
+            )),
+            DataType::Row(v) => {
+                DataType::Row(RowType::with_nullable(nullable, v.fields().to_vec()))
+            }
+        })
     }
 }
 
@@ -1328,6 +1394,10 @@ impl RowType {
 
     pub fn family(&self) -> DataTypeFamily {
         DataTypeFamily::CONSTRUCTED
+    }
+
+    pub fn fields(&self) -> &[DataField] {
+        &self.fields
     }
 }
 
