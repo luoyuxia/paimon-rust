@@ -17,10 +17,12 @@
 
 //! Table API for Apache Paimon
 
+mod read_builder;
 mod snapshot_manager;
 mod source;
 mod table_scan;
 
+pub use read_builder::{ReadBuilder, TableRead};
 pub use snapshot_manager::SnapshotManager;
 pub use source::{DataSplit, DataSplitBuilder, Plan};
 pub use table_scan::TableScan;
@@ -77,10 +79,10 @@ impl Table {
         &self.file_io
     }
 
-    /// Create a table scan for full table read (no incremental, no predicate).
+    /// Create a read builder for scan/read with optional projection and limit.
     ///
-    /// Reference: [pypaimon TableScan](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/read/table_scan.py).
-    pub fn new_scan(&self) -> TableScan {
-        TableScan::new(self.clone())
+    /// Reference: [pypaimon FileStoreTable.new_read_builder](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/table/file_store_table.py).
+    pub fn new_read_builder(&self) -> ReadBuilder {
+        ReadBuilder::new(self)
     }
 }
