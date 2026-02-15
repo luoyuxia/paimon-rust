@@ -22,7 +22,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use opendal::Operator;
+use opendal::raw::normalize_root;
+use opendal::{Metakey, Operator};
 use snafu::ResultExt;
 use url::Url;
 
@@ -42,6 +43,25 @@ impl FileIO {
             message: format!("Invalid URL: {path}"),
         })?;
 
+        Ok(FileIOBuilder::new(url.scheme()))
+    }
+
+    /// Try to infer file io scheme from path. See [`FileIO`] for supported schemes.
+    ///
+    /// - If it's a valid url, for example `s3://bucket/a`, url scheme will be used, and the rest of the url will be ignored.
+    /// - If it's not a valid url, will try to detect if it's a file path.
+    ///
+    /// Otherwise will return parsing error.
+    pub fn from_path(path: impl AsRef<str>) -> crate::Result<FileIOBuilder> {
+        let url = Url::parse(path.as_ref())
+            .map_err(|_| Error::ConfigInvalid {
+                message: format!("Invalid URL: {}", path.as_ref()),
+            })
+            .or_else(|_| {
+                Url::from_file_path(path.as_ref()).map_err(|_| Error::ConfigInvalid {
+                    message: format!("Input {} is neither a valid url nor path", path.as_ref()),
+                })
+            })?;
         Ok(FileIOBuilder::new(url.scheme()))
     }
 
@@ -97,10 +117,18 @@ impl FileIO {
     /// FIXME: how to handle large dir? Better to return a stream instead?
     pub async fn list_status(&self, path: &str) -> Result<Vec<FileStatus>> {
         let (op, relative_path) = self.storage.create(path)?;
+        // Opendal list() expects directory path to end with `/`.
+        // use normalize_root to make sure it end with `/`.
+        let list_path = normalize_root(relative_path);
 
-        let entries = op.list(relative_path).await.context(IoUnexpectedSnafu {
-            message: format!("Failed to list files in '{path}'"),
-        })?;
+        // Request ContentLength and LastModified so accessing meta.content_length() / last_modified()
+        let entries = op
+            .list_with(&list_path)
+            .metakey(Metakey::ContentLength | Metakey::LastModified)
+            .await
+            .context(IoUnexpectedSnafu {
+                message: format!("Failed to list files in '{path}'"),
+            })?;
 
         let mut statuses = Vec::new();
 
@@ -109,7 +137,7 @@ impl FileIO {
             statuses.push(FileStatus {
                 size: meta.content_length(),
                 is_dir: meta.is_dir(),
-                path: path.to_string(),
+                path: entry.path().to_string(),
                 last_modified: meta.last_modified(),
             });
         }
@@ -163,12 +191,11 @@ impl FileIO {
     /// Reference: <https://github.com/apache/paimon/blob/release-0.8.2/paimon-common/src/main/java/org/apache/paimon/fs/FileIO.java#L150>
     pub async fn mkdirs(&self, path: &str) -> Result<()> {
         let (op, relative_path) = self.storage.create(path)?;
-
-        op.create_dir(relative_path)
-            .await
-            .context(IoUnexpectedSnafu {
-                message: format!("Failed to create directory '{path}'"),
-            })?;
+        // Opendal create_dir expects the path to end with `/` to indicate a directory.
+        let dir_path = normalize_root(relative_path);
+        op.create_dir(&dir_path).await.context(IoUnexpectedSnafu {
+            message: format!("Failed to create directory '{path}'"),
+        })?;
 
         Ok(())
     }
