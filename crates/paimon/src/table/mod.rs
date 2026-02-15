@@ -17,9 +17,13 @@
 
 //! Table API for Apache Paimon
 
+mod snapshot_manager;
 mod source;
+mod table_scan;
 
-pub use source::{DataSplit, Plan};
+pub use snapshot_manager::SnapshotManager;
+pub use source::{DataSplit, DataSplitBuilder, Plan};
+pub use table_scan::TableScan;
 
 use crate::catalog::Identifier;
 use crate::io::FileIO;
@@ -71,5 +75,12 @@ impl Table {
     /// Get the FileIO instance for this table.
     pub fn file_io(&self) -> &FileIO {
         &self.file_io
+    }
+
+    /// Create a table scan for full table read (no incremental, no predicate).
+    ///
+    /// Reference: [pypaimon TableScan](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/read/table_scan.py).
+    pub fn new_scan(&self) -> TableScan {
+        TableScan::new(self.clone())
     }
 }

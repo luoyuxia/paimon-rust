@@ -34,7 +34,7 @@ pub struct DataSplit {
     partition: BinaryRow,
     bucket: i32,
     bucket_path: String,
-    total_buckets: Option<i32>,
+    total_buckets: i32,
     data_files: Vec<DataFileMeta>,
 }
 
@@ -51,7 +51,7 @@ impl DataSplit {
     pub fn bucket_path(&self) -> &str {
         &self.bucket_path
     }
-    pub fn total_buckets(&self) -> Option<i32> {
+    pub fn total_buckets(&self) -> i32 {
         self.total_buckets
     }
 
@@ -78,7 +78,7 @@ pub struct DataSplitBuilder {
     partition: Option<BinaryRow>,
     bucket: i32,
     bucket_path: Option<String>,
-    total_buckets: Option<i32>,
+    total_buckets: i32,
     data_files: Option<Vec<DataFileMeta>>,
 }
 
@@ -89,7 +89,7 @@ impl DataSplitBuilder {
             partition: None,
             bucket: -1,
             bucket_path: None,
-            total_buckets: None,
+            total_buckets: -1,
             data_files: None,
         }
     }
@@ -110,8 +110,12 @@ impl DataSplitBuilder {
         self.bucket_path = Some(bucket_path);
         self
     }
-    pub fn with_total_buckets(mut self, total_buckets: Option<i32>) -> Self {
+    pub fn with_total_buckets(mut self, total_buckets: i32) -> Self {
         self.total_buckets = total_buckets;
+        self
+    }
+    pub fn with_data_files(mut self, data_files: Vec<DataFileMeta>) -> Self {
+        self.data_files = Some(data_files);
         self
     }
 

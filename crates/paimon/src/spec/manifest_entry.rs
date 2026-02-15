@@ -47,7 +47,7 @@ pub struct ManifestEntry {
     total_buckets: i32,
 
     #[serde(rename = "_FILE")]
-    file: DataFileMeta,
+    pub(crate) file: DataFileMeta,
 
     #[serde(rename = "_VERSION")]
     version: i32,
@@ -59,7 +59,8 @@ impl ManifestEntry {
         &self.kind
     }
 
-    fn partition(&self) -> &Vec<u8> {
+    /// Partition bytes for this entry (for grouping splits).
+    pub fn partition(&self) -> &[u8] {
         &self.partition
     }
 
