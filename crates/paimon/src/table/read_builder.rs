@@ -1,0 +1,75 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+//! ReadBuilder and TableRead for table read API.
+//!
+//! Reference: [pypaimon.read.read_builder.ReadBuilder](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/read/read_builder.py)
+//! and [pypaimon.table.file_store_table.FileStoreTable.new_read_builder](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/table/file_store_table.py).
+
+use crate::spec::DataField;
+use crate::Result;
+
+use super::{Table, TableScan};
+
+/// Builder for table scan and table read (new_scan, new_read).
+///
+/// Reference: [pypaimon.read.read_builder.ReadBuilder](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/read/read_builder.py)
+#[derive(Debug, Clone)]
+pub struct ReadBuilder<'a> {
+    table: &'a Table,
+}
+
+impl<'a> ReadBuilder<'a> {
+    pub(crate) fn new(table: &'a Table) -> Self {
+        Self { table }
+    }
+
+    /// Create a table scan. Call [TableScan::plan] to get splits.
+    pub fn new_scan(self) -> TableScan<'a> {
+        TableScan::new(self.table)
+    }
+
+    /// Create a table read for consuming splits (e.g. from a scan plan).
+    pub fn new_read(self) -> Result<TableRead<'a>> {
+        let read_type = self.table.schema.fields();
+        Ok(TableRead {
+            table: self.table,
+            read_type,
+        })
+    }
+}
+
+/// Table read: reads data from splits (e.g. produced by [TableScan::plan]).
+///
+/// Reference: [pypaimon.read.table_read.TableRead](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/read/table_read.py)
+#[derive(Debug, Clone)]
+pub struct TableRead<'a> {
+    table: &'a Table,
+    read_type: &'a [DataField],
+}
+
+impl<'a> TableRead<'a> {
+    /// Schema (fields) that this read will produce.
+    pub fn read_type(&self) -> &[DataField] {
+        self.read_type
+    }
+
+    /// Table for this read.
+    pub fn table(&self) -> &Table {
+        self.table
+    }
+}

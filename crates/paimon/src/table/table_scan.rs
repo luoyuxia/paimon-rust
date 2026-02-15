@@ -107,12 +107,12 @@ fn merge_manifest_entries(entries: Vec<ManifestEntry>) -> Vec<ManifestEntry> {
 ///
 /// Reference: [pypaimon.read.table_scan.TableScan](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/read/table_scan.py)
 #[derive(Debug, Clone)]
-pub struct TableScan {
-    table: Table,
+pub struct TableScan<'a> {
+    table: &'a Table,
 }
 
-impl TableScan {
-    pub fn new(table: Table) -> Self {
+impl<'a> TableScan<'a> {
+    pub fn new(table: &'a Table) -> Self {
         Self { table }
     }
 
