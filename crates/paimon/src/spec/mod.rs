@@ -39,9 +39,13 @@ pub use index_file_meta::*;
 
 mod index_manifest;
 mod manifest;
+pub use manifest::Manifest;
 mod manifest_common;
+pub use manifest_common::FileKind;
 mod manifest_entry;
+pub use manifest_entry::ManifestEntry;
 mod objects_file;
+pub use objects_file::from_avro_bytes;
 mod stats;
 mod types;
 pub use types::*;
