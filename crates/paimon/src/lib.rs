@@ -24,3 +24,4 @@ pub mod file_index;
 pub mod io;
 pub mod spec;
 mod table;
+pub use table::{DataSplit, Plan, Table};

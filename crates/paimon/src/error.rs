@@ -35,6 +35,16 @@ pub enum Error {
     )]
     Unsupported { message: String },
     #[snafu(
+        whatever,
+        display("Fluss hitting unexpected error {}: {:?}", message, source)
+    )]
+    UnexpectedError {
+        message: String,
+        /// see https://github.com/shepmaster/snafu/issues/446
+        #[snafu(source(from(Box<dyn std::error::Error + Send + Sync + 'static>, Some)))]
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    },
+    #[snafu(
         visibility(pub(crate)),
         display("Paimon data type invalid for {}", message)
     )]

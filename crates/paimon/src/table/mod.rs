@@ -17,6 +17,10 @@
 
 //! Table API for Apache Paimon
 
+mod source;
+
+pub use source::{DataSplit, Plan};
+
 use crate::catalog::Identifier;
 use crate::io::FileIO;
 use crate::spec::TableSchema;
