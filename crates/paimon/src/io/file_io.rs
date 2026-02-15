@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use opendal::Operator;
+use opendal::{Metakey, Operator};
 use snafu::ResultExt;
 use url::Url;
 
@@ -97,10 +97,22 @@ impl FileIO {
     /// FIXME: how to handle large dir? Better to return a stream instead?
     pub async fn list_status(&self, path: &str) -> Result<Vec<FileStatus>> {
         let (op, relative_path) = self.storage.create(path)?;
+        // Opendal list() expects directory path to end with `/`.
+        let list_path = if relative_path.ends_with('/') {
+            relative_path.to_string()
+        } else {
+            format!("{relative_path}/")
+        };
 
-        let entries = op.list(relative_path).await.context(IoUnexpectedSnafu {
-            message: format!("Failed to list files in '{path}'"),
-        })?;
+        // Request ContentLength and LastModified so accessing meta.content_length() / last_modified()
+        // does not trigger "visiting not set metadata" warnings. See opendal list_with metakey.
+        let entries = op
+            .list_with(&list_path)
+            .metakey(Metakey::ContentLength | Metakey::LastModified)
+            .await
+            .context(IoUnexpectedSnafu {
+                message: format!("Failed to list files in '{path}'"),
+            })?;
 
         let mut statuses = Vec::new();
 
@@ -109,7 +121,7 @@ impl FileIO {
             statuses.push(FileStatus {
                 size: meta.content_length(),
                 is_dir: meta.is_dir(),
-                path: path.to_string(),
+                path: entry.path().to_string(),
                 last_modified: meta.last_modified(),
             });
         }
@@ -163,12 +175,15 @@ impl FileIO {
     /// Reference: <https://github.com/apache/paimon/blob/release-0.8.2/paimon-common/src/main/java/org/apache/paimon/fs/FileIO.java#L150>
     pub async fn mkdirs(&self, path: &str) -> Result<()> {
         let (op, relative_path) = self.storage.create(path)?;
-
-        op.create_dir(relative_path)
-            .await
-            .context(IoUnexpectedSnafu {
-                message: format!("Failed to create directory '{path}'"),
-            })?;
+        // Opendal create_dir expects the path to end with `/` to indicate a directory.
+        let dir_path = if relative_path.ends_with('/') {
+            relative_path.to_string()
+        } else {
+            format!("{relative_path}/")
+        };
+        op.create_dir(&dir_path).await.context(IoUnexpectedSnafu {
+            message: format!("Failed to create directory '{path}'"),
+        })?;
 
         Ok(())
     }
