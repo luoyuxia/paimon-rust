@@ -31,7 +31,9 @@ use crate::io::FileIO;
 use crate::spec::{Schema, TableSchema};
 use crate::table::Table;
 
-/// Prefix for schema files.
+/// Name of the schema directory under each table path.
+const SCHEMA_DIR: &str = "schema";
+/// Prefix for schema files (under the schema directory).
 const SCHEMA_PREFIX: &str = "schema-";
 
 /// Filesystem catalog implementation.
@@ -41,12 +43,14 @@ const SCHEMA_PREFIX: &str = "schema-";
 /// warehouse/
 ///   ├── database1/
 ///   │   ├── table1/
-///   │   │   ├── schema-0
-///   │   │   ├── schema-1
-///   │   │   └── ...
+///   │   │   └── schema/
+///   │   │       ├── schema-0
+///   │   │       ├── schema-1
+///   │   │       └── ...
 ///   │   └── table2/
-///   │   │   ├── schema-0
-///   │   │   └── ...
+///   │       └── schema/
+///   │           ├── schema-0
+///   │           └── ...
 ///   └── database2/
 ///       └── ...
 /// ```
@@ -65,8 +69,11 @@ impl FileSystemCatalog {
     /// # Arguments
     /// * `file_io` - The FileIO instance for filesystem operations
     /// * `warehouse` - The root warehouse path
-    pub fn new(file_io: FileIO, warehouse: String) -> Self {
-        Self { file_io, warehouse }
+    pub fn new(file_io: FileIO, warehouse: impl Into<String>) -> Self {
+        Self {
+            file_io,
+            warehouse: warehouse.into(),
+        }
     }
 
     /// Get the warehouse path.
@@ -92,9 +99,19 @@ impl FileSystemCatalog {
         path.to_string_lossy().to_string()
     }
 
-    /// Get the schema file path for a given version.
+    /// Path to the schema directory under a table path.
+    fn schema_dir_path(&self, table_path: &str) -> String {
+        StdPath::new(table_path)
+            .join(SCHEMA_DIR)
+            .to_string_lossy()
+            .to_string()
+    }
+
+    /// Get the schema file path for a given version (table_path/schema/schema-{version}).
     fn schema_file_path(&self, table_path: &str, version: i64) -> String {
-        let path = StdPath::new(table_path).join(format!("{SCHEMA_PREFIX}{version}"));
+        let path = StdPath::new(table_path)
+            .join(SCHEMA_DIR)
+            .join(format!("{SCHEMA_PREFIX}{version}"));
         path.to_string_lossy().to_string()
     }
 
@@ -115,9 +132,13 @@ impl FileSystemCatalog {
         Ok(dirs)
     }
 
-    /// Load the latest schema for a table (highest schema-{version} file).
+    /// Load the latest schema for a table (highest schema-{version} file under table_path/schema).
     async fn load_latest_table_schema(&self, table_path: &str) -> Result<Option<TableSchema>> {
-        let statuses = self.file_io.list_status(table_path).await?;
+        let schema_dir = self.schema_dir_path(table_path);
+        if !self.file_io.exists(&schema_dir).await? {
+            return Ok(None);
+        }
+        let statuses = self.file_io.list_status(&schema_dir).await?;
 
         let mut latest_version: Option<i64> = None;
         for status in statuses {
@@ -152,6 +173,8 @@ impl FileSystemCatalog {
 
     /// Save a table schema to a file.
     async fn save_table_schema(&self, table_path: &str, schema: &TableSchema) -> Result<()> {
+        let schema_dir = self.schema_dir_path(table_path);
+        self.file_io.mkdirs(&schema_dir).await?;
         let schema_path = self.schema_file_path(table_path, schema.id());
         let output_file = self.file_io.new_output(&schema_path)?;
         let content =
