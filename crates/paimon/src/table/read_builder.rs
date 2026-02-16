@@ -20,9 +20,10 @@
 //! Reference: [pypaimon.read.read_builder.ReadBuilder](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/read/read_builder.py)
 //! and [pypaimon.table.file_store_table.FileStoreTable.new_read_builder](https://github.com/apache/paimon/blob/master/paimon-python/pypaimon/table/file_store_table.py).
 
+use super::{ArrowRecordBatchStream, Table, TableScan};
+use crate::arrow::ArrowReaderBuilder;
 use crate::spec::DataField;
-
-use super::{Table, TableScan};
+use crate::DataSplit;
 
 /// Builder for table scan and table read (with_projection, new_scan, new_read).
 ///
@@ -97,5 +98,10 @@ impl<'a> TableRead<'a> {
     /// Table for this read.
     pub fn table(&self) -> &Table {
         self.table
+    }
+
+    pub fn to_arrow(&self, data_splits: &[DataSplit]) -> crate::Result<ArrowRecordBatchStream> {
+        let arrow_reader_builder = ArrowReaderBuilder::new(self.table.file_io.clone()).build();
+        arrow_reader_builder.read(data_splits)
     }
 }

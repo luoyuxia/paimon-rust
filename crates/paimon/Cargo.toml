@@ -49,8 +49,12 @@ snafu = "0.8.3"
 typed-builder = "^0.19"
 opendal = { version = "0.49", features = ["services-fs"] }
 pretty_assertions = "1"
-apache-avro = { version = "0.17", features = ["snappy"] }
+apache-avro = { version = "0.17", features = ["snappy", "zstandard"] }
 indexmap = "2.5.0"
+arrow-array = { version = "55" }
+futures = "0.3"
+parquet = { version = "55", features = ["async", "zstd"] }
+async-stream = "0.3.6"
 
 [dev-dependencies]
 rand = "0.8.5"

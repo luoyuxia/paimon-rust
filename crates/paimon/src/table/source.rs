@@ -59,6 +59,22 @@ impl DataSplit {
         &self.data_files
     }
 
+    /// Full path for a single data file in this split (bucket_path + file_name).
+    pub fn data_file_path(&self, file: &DataFileMeta) -> String {
+        let base = self.bucket_path.trim_end_matches('/');
+        format!("{}/{}", base, file.file_name)
+    }
+
+    /// Iterate over each data file in this split, yielding `(path, &DataFileMeta)`.
+    /// Use this to read each data file one by one (e.g. in ArrowReader).
+    pub fn data_file_entries(&self) -> impl Iterator<Item = (String, &DataFileMeta)> + '_ {
+        let base = self.bucket_path.trim_end_matches('/');
+        self.data_files.iter().map(move |file| {
+            let path = format!("{}/{}", base, file.file_name);
+            (path, file)
+        })
+    }
+
     /// Total row count of all data files in this split.
     pub fn row_count(&self) -> i64 {
         self.data_files.iter().map(|f| f.row_count).sum()

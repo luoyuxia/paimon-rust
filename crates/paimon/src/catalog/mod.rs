@@ -25,6 +25,7 @@ mod filesystem;
 use std::collections::HashMap;
 use std::fmt;
 
+pub use filesystem::*;
 use serde::{Deserialize, Serialize};
 
 // ======================= Identifier ===============================
