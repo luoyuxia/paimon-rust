@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 use snafu::prelude::*;
 
 /// Result type used in paimon.
