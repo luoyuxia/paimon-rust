@@ -22,6 +22,7 @@
 
 use crate::deletion_vector::{DeletionVector, DeletionVectorFactory};
 use crate::io::{FileIO, FileRead, FileStatus};
+use crate::spec::DataField;
 use crate::table::ArrowRecordBatchStream;
 use crate::DataSplit;
 use async_stream::try_stream;
@@ -30,7 +31,7 @@ use futures::future::BoxFuture;
 use futures::{StreamExt, TryFutureExt};
 use parquet::arrow::arrow_reader::{ArrowReaderOptions, RowSelection, RowSelector};
 use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
-use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::file::metadata::{ParquetMetaData, RowGroupMetaData};
 use std::ops::Range;
 use std::sync::Arc;
@@ -57,11 +58,13 @@ impl ArrowReaderBuilder {
         self
     }
 
-    /// Build the ArrowReader.
-    pub fn build(self) -> ArrowReader {
+    /// Build the ArrowReader with the given read type (logical row type or projected subset).
+    /// Used to clip Parquet schema to requested columns only.
+    pub fn build(self, read_type: Vec<DataField>) -> ArrowReader {
         ArrowReader {
             batch_size: self.batch_size,
             file_io: self.file_io,
+            read_type,
         }
     }
 }
@@ -71,6 +74,7 @@ impl ArrowReaderBuilder {
 pub struct ArrowReader {
     batch_size: Option<usize>,
     file_io: FileIO,
+    read_type: Vec<DataField>,
 }
 
 impl ArrowReader {
@@ -81,9 +85,13 @@ impl ArrowReader {
     ///
     /// Matches [RawFileSplitRead.createReader](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/operation/RawFileSplitRead.java):
     /// one DV factory per DataSplit (created from that split's data files and deletion files).
+    ///
+    /// Parquet schema is clipped to this reader's read type (column names from [DataField]s).
+    /// File-only columns are not read. See [ParquetReaderFactory.clipParquetSchema](https://github.com/apache/paimon/blob/master/paimon-format/paimon-format-common/src/main/java/org/apache/paimon/format/FormatReaderFactory.java).
     pub fn read(self, data_splits: &[DataSplit]) -> crate::Result<ArrowRecordBatchStream> {
         let file_io = self.file_io.clone();
         let batch_size = self.batch_size;
+        let read_type = self.read_type;
         // Owned list of splits so the stream does not hold references.
         let splits: Vec<DataSplit> = data_splits.to_vec();
 
@@ -116,6 +124,16 @@ impl ArrowReader {
                     let mut batch_stream_builder =
                         ParquetRecordBatchStreamBuilder::new(arrow_file_reader)
                             .await?;
+
+                    // Clip to read type columns; file-only columns are dropped.
+                    if !read_type.is_empty() {
+                        let parquet_schema = batch_stream_builder.parquet_schema();
+                        let mask = ProjectionMask::columns(
+                            parquet_schema,
+                            read_type.iter().map(|f| f.name()),
+                        );
+                        batch_stream_builder = batch_stream_builder.with_projection(mask);
+                    }
 
                     if let Some(ref dv) = dv {
                         if !dv.is_empty() {

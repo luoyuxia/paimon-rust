@@ -101,7 +101,8 @@ impl<'a> TableRead<'a> {
     }
 
     pub fn to_arrow(&self, data_splits: &[DataSplit]) -> crate::Result<ArrowRecordBatchStream> {
-        let arrow_reader_builder = ArrowReaderBuilder::new(self.table.file_io.clone()).build();
-        arrow_reader_builder.read(data_splits)
+        let reader = ArrowReaderBuilder::new(self.table.file_io.clone())
+            .build(self.read_type().to_vec());
+        reader.read(data_splits)
     }
 }
