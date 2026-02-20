@@ -83,7 +83,7 @@ fn build_deletion_files_map(
 ) -> HashMap<PartitionBucket, HashMap<String, DeletionFile>> {
     use crate::spec::FileKind;
     let table_path = table_path.trim_end_matches('/');
-    let index_path_prefix = format!("{}/{}", table_path, INDEX_DIR);
+    let index_path_prefix = format!("{table_path}/{INDEX_DIR}");
     let mut map: HashMap<PartitionBucket, HashMap<String, DeletionFile>> = HashMap::new();
     for entry in index_entries {
         if entry.kind != FileKind::Add {
@@ -197,7 +197,7 @@ impl<'a> TableScan<'a> {
         let deletion_files_map = if let Some(index_manifest_name) = snapshot.index_manifest() {
             let index_manifest_path =
                 format!("{}/{}", base_path.trim_end_matches('/'), MANIFEST_DIR);
-            let path = format!("{}/{}", index_manifest_path, index_manifest_name);
+            let path = format!("{index_manifest_path}/{index_manifest_name}");
             let index_entries = IndexManifest::read(file_io, &path).await?;
             Some(build_deletion_files_map(&index_entries, base_path))
         } else {
@@ -218,19 +218,20 @@ impl<'a> TableScan<'a> {
                 data_files.push(file);
             }
             let bucket_path = format!("{base_path}/bucket-{bucket}");
-            
+
             // todo: consider pass real partition binary row
             let partition = crate::spec::EMPTY_BINARY_ROW.clone();
 
             // Same order as data_files; None at index i = no deletion file for data_files[i] (Java getDeletionFiles).
-            let data_deletion_files = deletion_files_map.as_ref().and_then(|map| map.get(&key)).map(
-                |per_bucket| {
+            let data_deletion_files = deletion_files_map
+                .as_ref()
+                .and_then(|map| map.get(&key))
+                .map(|per_bucket| {
                     data_files
                         .iter()
                         .map(|f| per_bucket.get(&f.file_name).cloned())
                         .collect::<Vec<Option<DeletionFile>>>()
-                },
-            );
+                });
 
             let mut builder = DataSplitBuilder::new()
                 .with_snapshot(snapshot_id)

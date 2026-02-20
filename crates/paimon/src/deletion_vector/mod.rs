@@ -17,3 +17,6 @@
 
 mod deletion_vector;
 mod factory;
+
+pub use deletion_vector::DeletionVector;
+pub use factory::DeletionVectorFactory;

@@ -50,15 +50,6 @@ impl DeletionVector {
         }
     }
 
-    /// Check if a row at the given position is deleted
-    pub fn is_deleted(&self, row_position: u64) -> bool {
-        // RoaringBitmap32 in Java supports up to 2^31-1, so we check u32 range
-        if row_position > u32::MAX as u64 {
-            return false;
-        }
-        self.bitmap.contains(row_position as u32)
-    }
-
     /// Get the number of deleted rows (cardinality)
     pub fn deleted_count(&self) -> u64 {
         self.bitmap.len()
@@ -72,6 +63,18 @@ impl DeletionVector {
     /// Get the underlying bitmap (read-only)
     pub fn bitmap(&self) -> &RoaringBitmap {
         &self.bitmap
+    }
+
+    /// Returns an iterator over deleted positions that supports [DeletionVectorIterator::advance_to].
+    /// Required for efficient row selection building when skipping row groups (avoid re-scanning
+    /// deletes in skipped ranges).
+    ///
+    /// Ideally we would wrap `roaring::RoaringBitmap::iter()` directly, but that iterator does not
+    /// expose `advance_to`. There is a PR open on roaring to add this
+    /// (<https://github.com/RoaringBitmap/roaring-rs/pull/314>); once merged we can simplify
+    /// by delegating `advance_to` to the underlying iterator.
+    pub fn iter(&self) -> DeletionVectorIterator {
+        DeletionVectorIterator::new(self.bitmap.iter().map(u64::from).collect())
     }
 
     /// Read a DeletionVector from bytes, similar to Java DeletionVector.read(DataInputStream, length)
@@ -158,6 +161,40 @@ impl Default for DeletionVector {
     }
 }
 
+/// Iterator over deleted row positions with [advance_to](DeletionVectorIterator::advance_to) support.
+///
+/// See [DeletionVector::iter] for why we use an internal sorted vec instead of wrapping
+/// `roaring::RoaringBitmap::iter()` (which does not provide `advance_to`).
+#[derive(Debug)]
+pub struct DeletionVectorIterator {
+    /// Sorted deleted positions (from bitmap.iter()).
+    positions: Vec<u64>,
+    cursor: usize,
+}
+
+impl DeletionVectorIterator {
+    pub(crate) fn new(positions: Vec<u64>) -> Self {
+        Self {
+            positions,
+            cursor: 0,
+        }
+    }
+}
+
+impl Iterator for DeletionVectorIterator {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor < self.positions.len() {
+            let v = self.positions[self.cursor];
+            self.cursor += 1;
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,8 +217,5 @@ mod tests {
         let expected_bitmap = RoaringBitmap::from_iter([1u32, 2u32]);
         assert_eq!(dv.bitmap(), &expected_bitmap, "bitmap should be [1, 2]");
         assert_eq!(dv.deleted_count(), 2);
-        assert!(dv.is_deleted(1));
-        assert!(dv.is_deleted(2));
-        assert!(!dv.is_deleted(0));
     }
 }

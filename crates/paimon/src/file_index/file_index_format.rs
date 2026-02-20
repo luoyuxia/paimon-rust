@@ -262,10 +262,9 @@ impl FileIndex {
 
     /// Read bytes from the index file at the specified position and length
     pub async fn read_bytes(&self, start: i64, length: i64) -> crate::Result<Bytes> {
-        Ok(self
-            .reader
+        self.reader
             .read(start as u64..(start + length) as u64)
-            .await?)
+            .await
     }
 }
 

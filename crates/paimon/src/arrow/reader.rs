@@ -15,6 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+//! Arrow reader with optional deletion vector filtering.
+//!
+//! Reference: [RawFileSplitRead.createReader](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/operation/RawFileSplitRead.java).
+//! Uses [DeletionVectorFactory] to resolve deletion vectors by file name (same as Java's DeletionVector.Factory).
+
+use crate::deletion_vector::{DeletionVector, DeletionVectorFactory};
 use crate::io::{FileIO, FileRead, FileStatus};
 use crate::table::ArrowRecordBatchStream;
 use crate::DataSplit;
@@ -22,10 +28,10 @@ use async_stream::try_stream;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryFutureExt};
-use parquet::arrow::arrow_reader::ArrowReaderOptions;
+use parquet::arrow::arrow_reader::{ArrowReaderOptions, RowSelection, RowSelector};
 use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
-use parquet::file::metadata::ParquetMetaData;
+use parquet::file::metadata::{ParquetMetaData, RowGroupMetaData};
 use std::ops::Range;
 use std::sync::Arc;
 use tokio::try_join;
@@ -69,42 +75,141 @@ pub struct ArrowReader {
 
 impl ArrowReader {
     /// Take a stream of DataSplits and read every data file in each split.
-    /// Returns a stream of Arrow RecordBatches from all files.
+    /// When a split has deletion files (see [DataSplit::data_deletion_files]), the corresponding
+    /// deletion vectors are loaded and applied so that deleted rows are filtered out from the stream.
+    /// Row positions are 0-based within each data file, matching Java's ApplyDeletionVectorReader.
+    ///
+    /// Matches [RawFileSplitRead.createReader](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/operation/RawFileSplitRead.java):
+    /// one DV factory per DataSplit (created from that split's data files and deletion files).
     pub fn read(self, data_splits: &[DataSplit]) -> crate::Result<ArrowRecordBatchStream> {
         let file_io = self.file_io.clone();
         let batch_size = self.batch_size;
-        let paths_to_read: Vec<String> = data_splits
-            .iter()
-            .flat_map(|ds| ds.data_file_entries().map(|(p, _)| p))
-            .collect();
+        // Owned list of splits so the stream does not hold references.
+        let splits: Vec<DataSplit> = data_splits.to_vec();
+
         Ok(try_stream! {
-            for path_to_read in paths_to_read {
-                let parquet_file = file_io.new_input(&path_to_read)?;
+            for split in splits {
+                // Create DV factory for this split only (like Java createReader(partition, bucket, files, deletionFiles)).
+                // Build (file_name, opt_deletion_file) by index: data_deletion_files[i] corresponds to data_files[i].
+                let dv_entries: Vec<(String, Option<crate::DeletionFile>)> = split
+                    .data_files()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| (f.file_name.clone(), split.deletion_file_for_data_file_index(i).cloned()))
+                    .collect();
+                let dv_factory = DeletionVectorFactory::create_from_deletion_files(
+                    file_io.clone(),
+                    dv_entries,
+                )
+                .await?;
 
-                let (parquet_metadata, parquet_reader) = try_join!(
-                    parquet_file.metadata(),
-                    parquet_file.reader()
-                )?;
+                for (path_to_read, file_meta) in split.data_file_entries() {
+                    let dv = dv_factory.get_deletion_vector(&file_meta.file_name);
 
-                let arrow_file_reader = ArrowFileReader::new(parquet_metadata, parquet_reader);
+                    let parquet_file = file_io.new_input(&path_to_read)?;
+                    let (parquet_metadata, parquet_reader) = try_join!(
+                        parquet_file.metadata(),
+                        parquet_file.reader()
+                    )?;
+                    let arrow_file_reader = ArrowFileReader::new(parquet_metadata, parquet_reader);
 
-                let mut batch_stream_builder =
-                    ParquetRecordBatchStreamBuilder::new(arrow_file_reader)
-                        .await?;
+                    let mut batch_stream_builder =
+                        ParquetRecordBatchStreamBuilder::new(arrow_file_reader)
+                            .await?;
 
-                if let Some(size) = batch_size {
-                    batch_stream_builder = batch_stream_builder.with_batch_size(size);
-                }
+                    if let Some(ref dv) = dv {
+                        if !dv.is_empty() {
+                            let row_selection =
+                                build_deletes_row_selection(batch_stream_builder.metadata().row_groups(), dv)?;
+                            batch_stream_builder = batch_stream_builder.with_row_selection(row_selection);
+                        }
+                    }
+                    if let Some(size) = batch_size {
+                        batch_stream_builder = batch_stream_builder.with_batch_size(size);
+                    }
+                    let mut batch_stream = batch_stream_builder.build()?;
 
-                let mut batch_stream = batch_stream_builder.build()?;
-
-                while let Some(batch) = batch_stream.next().await {
-                    yield batch?
+                    while let Some(batch) = batch_stream.next().await {
+                        let batch = batch?;
+                        if batch.num_rows() > 0 {
+                            yield batch;
+                        }
+                    }
                 }
             }
         }
         .boxed())
     }
+}
+
+/// Builds a Parquet [RowSelection] from deletion vector.
+/// Only rows not in the deletion vector are selected; deleted rows are skipped at read time.
+/// Uses [DeletionVectorIterator] with [advance_to](DeletionVectorIterator::advance_to) when skipping row groups.
+fn build_deletes_row_selection(
+    row_group_metadata_list: &[RowGroupMetaData],
+    deletion_vector: &DeletionVector,
+) -> crate::Result<RowSelection> {
+    let mut delete_iter = deletion_vector.iter();
+
+    let mut results: Vec<RowSelector> = Vec::new();
+    let mut current_row_group_base_idx: u64 = 0;
+    let mut next_deleted_row_idx_opt = delete_iter.next();
+
+    for row_group_metadata in row_group_metadata_list {
+        let row_group_num_rows = row_group_metadata.num_rows() as u64;
+        let next_row_group_base_idx = current_row_group_base_idx + row_group_num_rows;
+
+        let mut next_deleted_row_idx = match next_deleted_row_idx_opt {
+            Some(next_deleted_row_idx) => {
+                if next_deleted_row_idx >= next_row_group_base_idx {
+                    results.push(RowSelector::select(row_group_num_rows as usize));
+                    current_row_group_base_idx += row_group_num_rows;
+                    continue;
+                }
+                next_deleted_row_idx
+            }
+            None => {
+                results.push(RowSelector::select(row_group_num_rows as usize));
+                current_row_group_base_idx += row_group_num_rows;
+                continue;
+            }
+        };
+
+        let mut current_idx = current_row_group_base_idx;
+        'chunks: while next_deleted_row_idx < next_row_group_base_idx {
+            if current_idx < next_deleted_row_idx {
+                let run_length = next_deleted_row_idx - current_idx;
+                results.push(RowSelector::select(run_length as usize));
+                current_idx += run_length;
+            }
+            let mut run_length = 0u64;
+            while next_deleted_row_idx == current_idx
+                && next_deleted_row_idx < next_row_group_base_idx
+            {
+                run_length += 1;
+                current_idx += 1;
+                next_deleted_row_idx_opt = delete_iter.next();
+                next_deleted_row_idx = match next_deleted_row_idx_opt {
+                    Some(v) => v,
+                    None => {
+                        results.push(RowSelector::skip(run_length as usize));
+                        break 'chunks;
+                    }
+                };
+            }
+            if run_length > 0 {
+                results.push(RowSelector::skip(run_length as usize));
+            }
+        }
+        if current_idx < next_row_group_base_idx {
+            results.push(RowSelector::select(
+                (next_row_group_base_idx - current_idx) as usize,
+            ));
+        }
+        current_row_group_base_idx += row_group_num_rows;
+    }
+
+    Ok(results.into())
 }
 
 /// ArrowFileReader is a wrapper around a FileRead that impls parquets AsyncFileReader.
