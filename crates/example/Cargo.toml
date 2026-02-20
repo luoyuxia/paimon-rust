@@ -8,8 +8,28 @@ version.workspace = true
 [dependencies]
 paimon = { workspace = true }
 tokio = { version = "1", features = ["full"] }
+# Match paimon-datafusion's datafusion to avoid duplicate/conflicting versions.
+datafusion = { version = "49", default-features = false, features = [
+    "nested_expressions",
+    "datetime_expressions",
+    "regex_expressions",
+    "string_expressions",
+    "unicode_expressions",
+    "recursive_protection",
+] }
+paimon-datafusion = { path = "../integrations/datafusion" }
 futures-util = "0.3.31"
 
 [[example]]
 name = "paimon-read"
 path = "src/paimon_read.rs"
+
+
+[[example]]
+name = "paimon-read-dv"
+path = "src/paimon_dv_read.rs"
+
+
+[[example]]
+name = "paimon-read-dv-datafusion"
+path = "src/paimon_datafusion_read.rs"

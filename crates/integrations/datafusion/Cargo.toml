@@ -15,18 +15,28 @@
 # specific language governing permissions and limitations
 # under the License.
 
-[workspace]
-resolver = "2"
-members = ["crates/paimon", "crates/example", "crates/integrations/datafusion"]
+[package]
+name = "paimon-datafusion"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Apache Paimon DataFusion Integration (read-only)"
+categories = ["database"]
+keywords = ["paimon", "datafusion", "integrations"]
 
-[workspace.package]
-version = "0.0.0"
-edition = "2021"
-homepage = "https://paimon.apache.org/"
-repository = "https://github.com/apache/paimon-rust"
-license = "Apache-2.0"
-rust-version = "1.86.0"
-
-[workspace.dependencies]
-paimon = { version = "0.0.0", path = "./crates/paimon" }
+[dependencies]
+async-trait = "0.1"
+# Disable default features to avoid pulling in compression (xz2/lzma), which can
+# conflict with other crates that link to liblzma.
+datafusion = { version = "49", default-features = false, features = [
+    "nested_expressions",
+    "datetime_expressions",
+    "regex_expressions",
+    "string_expressions",
+    "unicode_expressions",
+    "recursive_protection",
+] }
+paimon = { path = "../../paimon" }
+futures = "0.3"
+tokio = { version = "1", features = ["macros"] }
 
