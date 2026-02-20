@@ -15,20 +15,104 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! Table source types: DataSplit, Plan, and related structs.
+//! Table source types: DataSplit, Plan, DeletionFile, and related structs.
 //!
 //! Reference: [org.apache.paimon.table.source](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/table/source/).
 
 #![allow(dead_code)]
 
 use crate::spec::{BinaryRow, DataFileMeta};
+use serde::{Deserialize, Serialize};
+
+// ======================= DeletionFile ===============================
+
+/// Deletion file for a data file: describes a region in a file that stores deletion vector bitmap.
+///
+/// Format of the region (first 4 bytes length, then magic, then RoaringBitmap content):
+/// - First 4 bytes: length (should equal [Self::length]).
+/// - Next 4 bytes: magic number (1581511376).
+/// - Remaining: serialized RoaringBitmap.
+///
+/// Reference: [org.apache.paimon.table.source.DeletionFile](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/table/source/DeletionFile.java)
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeletionFile {
+    /// Path of the file containing the deletion vector (e.g. index file path).
+    path: String,
+    /// Starting offset of the deletion vector data in the file.
+    offset: i64,
+    /// Length in bytes of the deletion vector data.
+    length: i64,
+    /// Number of deleted rows (cardinality of the bitmap), if known.
+    cardinality: Option<i64>,
+}
+
+impl DeletionFile {
+    pub fn new(path: String, offset: i64, length: i64, cardinality: Option<i64>) -> Self {
+        Self {
+            path,
+            offset,
+            length,
+            cardinality,
+        }
+    }
+
+    /// Placeholder for a data file that has no deletion file (e.g. when building `data_deletion_files` with same length as `data_files`).
+    pub fn empty() -> Self {
+        Self {
+            path: String::new(),
+            offset: 0,
+            length: 0,
+            cardinality: None,
+        }
+    }
+
+    /// Path of the file.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Starting offset of data in the file.
+    pub fn offset(&self) -> i64 {
+        self.offset
+    }
+
+    /// Length of data in the file.
+    pub fn length(&self) -> i64 {
+        self.length
+    }
+
+    /// Number of deleted rows, if known.
+    pub fn cardinality(&self) -> Option<i64> {
+        self.cardinality
+    }
+
+    /// True if this is a placeholder (no actual deletion file); e.g. from [Self::empty].
+    pub fn is_empty_placeholder(&self) -> bool {
+        self.length == 0
+    }
+}
+
+// ======================= PartitionBucket ===============================
+
+/// Key for grouping splits by partition and bucket: (partition bytes, bucket id).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PartitionBucket {
+    pub partition: Vec<u8>,
+    pub bucket: i32,
+}
+
+impl PartitionBucket {
+    pub fn new(partition: Vec<u8>, bucket: i32) -> Self {
+        Self { partition, bucket }
+    }
+}
 
 // ======================= DataSplit ===============================
 
-/// Input split for reading: partition + bucket + list of data files.
+/// Input split for reading: partition + bucket + list of data files and optional deletion files.
 ///
 /// Reference: [org.apache.paimon.table.source.DataSplit](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/table/source/DataSplit.java)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataSplit {
     snapshot_id: i64,
     partition: BinaryRow,
@@ -36,6 +120,10 @@ pub struct DataSplit {
     bucket_path: String,
     total_buckets: i32,
     data_files: Vec<DataFileMeta>,
+    /// Deletion file for each data file, same order as `data_files`.
+    /// `None` at index `i` means no deletion file for `data_files[i]` (matches Java getDeletionFiles() / List<DeletionFile> with null elements).
+    #[serde(default)]
+    data_deletion_files: Option<Vec<Option<DeletionFile>>>,
 }
 
 impl DataSplit {
@@ -57,6 +145,28 @@ impl DataSplit {
 
     pub fn data_files(&self) -> &[DataFileMeta] {
         &self.data_files
+    }
+
+    /// Deletion files for each data file (same order as `data_files`); `None` = no deletion file for that data file.
+    pub fn data_deletion_files(&self) -> Option<&[Option<DeletionFile>]> {
+        self.data_deletion_files.as_deref()
+    }
+
+    /// Returns the deletion file for the data file at the given index, if any. `None` at that index means no deletion file.
+    pub fn deletion_file_for_data_file_index(&self, index: usize) -> Option<&DeletionFile> {
+        self.data_deletion_files
+            .as_deref()?
+            .get(index)
+            .and_then(Option::as_ref)
+    }
+
+    /// Returns the deletion file for the given data file (by file name), if any.
+    pub fn deletion_file_for_data_file(&self, file: &DataFileMeta) -> Option<&DeletionFile> {
+        let index = self
+            .data_files
+            .iter()
+            .position(|f| f.file_name == file.file_name)?;
+        self.deletion_file_for_data_file_index(index)
     }
 
     /// Full path for a single data file in this split (bucket_path + file_name).
@@ -96,6 +206,8 @@ pub struct DataSplitBuilder {
     bucket_path: Option<String>,
     total_buckets: i32,
     data_files: Option<Vec<DataFileMeta>>,
+    /// Same length as data_files; `None` at index i = no deletion file for data_files[i].
+    data_deletion_files: Option<Vec<Option<DeletionFile>>>,
 }
 
 impl DataSplitBuilder {
@@ -107,6 +219,7 @@ impl DataSplitBuilder {
             bucket_path: None,
             total_buckets: -1,
             data_files: None,
+            data_deletion_files: None,
         }
     }
 
@@ -135,6 +248,15 @@ impl DataSplitBuilder {
         self
     }
 
+    /// Sets deletion files; length must match data_files. Use `None` at index i when data_files[i] has no deletion file.
+    pub fn with_data_deletion_files(
+        mut self,
+        data_deletion_files: Vec<Option<DeletionFile>>,
+    ) -> Self {
+        self.data_deletion_files = Some(data_deletion_files);
+        self
+    }
+
     pub fn build(self) -> crate::Result<DataSplit> {
         let partition = self.partition.ok_or_else(|| crate::Error::ConfigInvalid {
             message: "DataSplit requires partition".to_string(),
@@ -159,6 +281,7 @@ impl DataSplitBuilder {
             bucket_path,
             total_buckets: self.total_buckets,
             data_files,
+            data_deletion_files: self.data_deletion_files,
         })
     }
 }

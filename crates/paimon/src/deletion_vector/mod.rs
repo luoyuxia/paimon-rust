@@ -16,3 +16,4 @@
 // under the License.
 
 mod deletion_vector;
+mod factory;
