@@ -36,7 +36,7 @@ pub enum Error {
     Unsupported { message: String },
     #[snafu(
         whatever,
-        display("Fluss hitting unexpected error {}: {:?}", message, source)
+        display("Paimon hitting unexpected error {}: {:?}", message, source)
     )]
     UnexpectedError {
         message: String,
