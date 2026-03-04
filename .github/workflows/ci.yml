@@ -67,8 +67,21 @@ jobs:
           - windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Test
         run: cargo test --all-targets --workspace
         env:
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Docker containers
+        run: make docker-up
+
+      - name: Stop Docker containers
+        if: always()
+        run: make docker-down
