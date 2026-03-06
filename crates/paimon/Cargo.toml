@@ -51,6 +51,8 @@ opendal = { version = "0.49", features = ["services-fs"] }
 pretty_assertions = "1"
 apache-avro = { version = "0.17", features = ["snappy"] }
 indexmap = "2.5.0"
+roaring = "0.10"
+crc32fast = "1.4"
 
 [dev-dependencies]
 rand = "0.8.5"

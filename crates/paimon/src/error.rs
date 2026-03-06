@@ -23,11 +23,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// Error type for paimon.
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("Paimon data invalid for {}: {:?}", message, source))]
+    #[snafu(whatever, display("Paimon data invalid for {}: {:?}", message, source))]
     DataInvalid {
         message: String,
-        #[snafu(backtrace)]
-        source: snafu::Whatever,
+        /// see https://github.com/shepmaster/snafu/issues/446
+        #[snafu(source(from(Box<dyn std::error::Error + Send + Sync + 'static>, Some)))]
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
     #[snafu(
         visibility(pub(crate)),
@@ -35,13 +36,12 @@ pub enum Error {
     )]
     Unsupported { message: String },
     #[snafu(
-        whatever,
+        visibility(pub(crate)),
         display("Paimon hitting unexpected error {}: {:?}", message, source)
     )]
     UnexpectedError {
         message: String,
-        /// see https://github.com/shepmaster/snafu/issues/446
-        #[snafu(source(from(Box<dyn std::error::Error + Send + Sync + 'static>, Some)))]
+        #[snafu(source(false))]
         source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
     #[snafu(
