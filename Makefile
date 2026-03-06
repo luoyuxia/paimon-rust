@@ -16,7 +16,6 @@
 # under the License.
 
 # Version defaults (can be overridden via environment variables)
-SPARK_VERSION ?= 3.5.3
 PAIMON_VERSION ?= 1.3.1
 
 # Warehouse path for integration tests
@@ -28,11 +27,9 @@ PAIMON_WAREHOUSE ?= /tmp/paimon-warehouse
 # Build and run Spark + Paimon container to provision test data.
 # Usage:
 #   make docker-up                              # use default versions
-#   SPARK_VERSION=3.5.2 make docker-up         # override Spark version
 #   PAIMON_VERSION=1.3.0 make docker-up        # override Paimon version
 docker-up:
 	docker compose -f dev/docker-compose.yaml build \
-		--build-arg SPARK_VERSION=$(SPARK_VERSION) \
 		--build-arg PAIMON_VERSION=$(PAIMON_VERSION)
 	docker compose -f dev/docker-compose.yaml run --rm spark-paimon
 

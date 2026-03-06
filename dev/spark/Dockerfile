@@ -20,11 +20,8 @@
 # so paimon-rust can read the data).
 #
 # Build args can be overridden via Makefile or docker build:
-#   --build-arg SPARK_VERSION=3.5.3
 #   --build-arg PAIMON_VERSION=1.3.1
-ARG SPARK_VERSION
-
-FROM apache/spark:${SPARK_VERSION}
+FROM apache/spark:3.5.3
 
 # Re-declare ARGs so they are available in this stage (ARGs before FROM are not).
 ARG PAIMON_VERSION
