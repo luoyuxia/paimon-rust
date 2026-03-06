@@ -15,14 +15,4 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod error;
-pub use error::Error;
-pub use error::Result;
-
-pub mod catalog;
-mod deletion_vector;
-pub mod file_index;
-pub mod io;
-pub mod spec;
-mod table;
-pub use table::{DataSplit, DataSplitBuilder, Plan, SnapshotManager, Table, TableScan};
+mod core;

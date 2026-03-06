@@ -23,7 +23,6 @@
 
 use crate::io::FileIO;
 use crate::spec::Snapshot;
-use snafu::{FromString, Whatever};
 use std::str;
 
 const SNAPSHOT_DIR: &str = "snapshot";
@@ -75,14 +74,14 @@ impl SnapshotManager {
         let content = input.read().await?;
         let id_str = str::from_utf8(&content).map_err(|e| crate::Error::DataInvalid {
             message: "LATEST snapshot file invalid utf8".to_string(),
-            source: Whatever::without_source(e.to_string()),
+            source: Some(Box::new(e)),
         })?;
         let snapshot_id: i64 = id_str
             .trim()
             .parse()
             .map_err(|e| crate::Error::DataInvalid {
                 message: format!("LATEST snapshot id not a number: {id_str:?}"),
-                source: Whatever::without_source(format!("{e:?}")),
+                source: Some(Box::new(e)),
             })?;
         let snapshot_path = self.snapshot_path(snapshot_id);
         let snap_input = self.file_io.new_input(&snapshot_path)?;
@@ -91,14 +90,14 @@ impl SnapshotManager {
                 message: format!(
                     "snapshot file does not exist: {snapshot_path} (LATEST points to snapshot id {snapshot_id})"
                 ),
-                source: Whatever::without_source("Snapshot file missing".to_string()),
+                source: None
             });
         }
         let snap_bytes = snap_input.read().await?;
         let snapshot: Snapshot =
             serde_json::from_slice(&snap_bytes).map_err(|e| crate::Error::DataInvalid {
                 message: format!("snapshot JSON invalid: {e}"),
-                source: Whatever::without_source(e.to_string()),
+                source: Some(Box::new(e)),
             })?;
         if snapshot.id() != snapshot_id {
             return Err(crate::Error::DataInvalid {
@@ -106,7 +105,7 @@ impl SnapshotManager {
                     "snapshot file id mismatch: LATEST points to {snapshot_id}, but file contains snapshot id {}",
                     snapshot.id()
                 ),
-                source: Whatever::without_source("Snapshot id mismatch".to_string()),
+                source: None
             });
         }
         Ok(Some(snapshot))

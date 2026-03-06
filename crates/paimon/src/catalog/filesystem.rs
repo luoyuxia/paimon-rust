@@ -29,7 +29,6 @@ use crate::table::Table;
 use async_trait::async_trait;
 use bytes::Bytes;
 use opendal::raw::get_basename;
-use snafu::{FromString, Whatever};
 
 /// Name of the schema directory under each table path.
 const SCHEMA_DIR: &str = "schema";
@@ -163,7 +162,7 @@ impl FileSystemCatalog {
             let schema: TableSchema =
                 serde_json::from_slice(&content).map_err(|e| Error::DataInvalid {
                     message: format!("Failed to parse schema file: {schema_path}"),
-                    source: Whatever::without_source(e.to_string()),
+                    source: Some(Box::new(e)),
                 })?;
             return Ok(Some(schema));
         }
@@ -181,7 +180,7 @@ impl FileSystemCatalog {
             Bytes::from(
                 serde_json::to_string(schema).map_err(|e| Error::DataInvalid {
                     message: format!("Failed to serialize schema: {e}"),
-                    source: Whatever::without_source(e.to_string()),
+                    source: Some(Box::new(e)),
                 })?,
             );
         output_file.write(content).await?;
