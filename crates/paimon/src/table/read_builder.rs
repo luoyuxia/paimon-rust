@@ -39,12 +39,12 @@ impl<'a> ReadBuilder<'a> {
     }
 
     /// Create a table scan. Call [TableScan::plan] to get splits.
-    pub fn new_scan(self) -> TableScan<'a> {
+    pub fn new_scan(&self) -> TableScan<'a> {
         TableScan::new(self.table)
     }
 
     /// Create a table read for consuming splits (e.g. from a scan plan).
-    pub fn new_read(self) -> Result<TableRead<'a>> {
+    pub fn new_read(&self) -> Result<TableRead<'a>> {
         let read_type = self.table.schema.fields();
         Ok(TableRead {
             table: self.table,
