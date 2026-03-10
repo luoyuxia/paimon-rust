@@ -24,13 +24,14 @@ use futures::future::BoxFuture;
 use futures::{StreamExt, TryFutureExt};
 use parquet::arrow::arrow_reader::ArrowReaderOptions;
 use parquet::arrow::async_reader::{AsyncFileReader, MetadataFetch};
-use parquet::file::metadata::ParquetMetaDataReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use parquet::file::metadata::ParquetMetaData;
+use parquet::file::metadata::ParquetMetaDataReader;
 use std::ops::Range;
 use std::sync::Arc;
 use tokio::try_join;
 
+/// Builder to create ArrowReader
 pub struct ArrowReaderBuilder {
     batch_size: Option<usize>,
     file_io: FileIO,
@@ -73,7 +74,9 @@ impl ArrowReader {
             .map(|p| {
                 if !p.to_ascii_lowercase().ends_with(".parquet") {
                     Err(Error::Unsupported {
-                        message: format!("unsupported file format: only .parquet is supported, got: {}", p),
+                        message: format!(
+                            "unsupported file format: only .parquet is supported, got: {p}"
+                        ),
                     })
                 } else {
                     Ok(p)
@@ -152,11 +155,13 @@ impl<R: FileRead> AsyncFileReader for ArrowFileReader<R> {
 
     fn get_metadata(
         &mut self,
-        _options: Option<&ArrowReaderOptions>,
-    ) -> BoxFuture<parquet::errors::Result<Arc<ParquetMetaData>>> {
+        options: Option<&ArrowReaderOptions>,
+    ) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
+        let metadata_opts = options.map(|o| o.metadata_options().clone());
         Box::pin(async move {
             let file_size = self.meta.size;
             let metadata = ParquetMetaDataReader::new()
+                .with_metadata_options(metadata_opts)
                 .load_and_finish(self, file_size)
                 .await?;
             Ok(Arc::new(metadata))

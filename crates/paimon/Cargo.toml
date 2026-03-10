@@ -52,9 +52,9 @@ pretty_assertions = "1"
 apache-avro = { version = "0.17", features = ["snappy", "zstandard"] }
 indexmap = "2.5.0"
 roaring = "0.10"
-arrow-array = { version = "55" }
+arrow-array = { workspace = true }
 futures = "0.3"
-parquet = { version = "55", features = ["async", "zstd"] }
+parquet = { workspace = true, features = ["async", "zstd"] }
 async-stream = "0.3.6"
 
 [dev-dependencies]

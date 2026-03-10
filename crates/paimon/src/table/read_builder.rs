@@ -23,8 +23,8 @@
 use super::{ArrowRecordBatchStream, Table, TableScan};
 use crate::arrow::ArrowReaderBuilder;
 use crate::spec::DataField;
-use crate::{DataSplit, Error};
 use crate::Result;
+use crate::{DataSplit, Error};
 
 /// Builder for table scan and table read (new_scan, new_read).
 ///
@@ -83,7 +83,7 @@ impl<'a> TableRead<'a> {
                     "Reading tables with primary keys is not yet supported. Primary keys: {:?}",
                     self.table.schema.primary_keys()
                 ),
-            })
+            });
         }
         if !self.table.schema.partition_keys().is_empty() {
             return Err(Error::Unsupported {
@@ -91,7 +91,7 @@ impl<'a> TableRead<'a> {
                     "Reading partitioned tables is not yet supported. Partition keys: {:?}",
                     self.table.schema.partition_keys()
                 ),
-            })
+            });
         }
         let arrow_reader_builder = ArrowReaderBuilder::new(self.table.file_io.clone()).build();
         arrow_reader_builder.read(data_splits)
