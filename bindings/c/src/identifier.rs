@@ -15,27 +15,48 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_void};
 
 use paimon::catalog::Identifier;
 
+use crate::error::validate_cstr;
+use crate::result::paimon_result_identifier_new;
 use crate::types::paimon_identifier;
 
 /// Create a new Identifier.
 ///
 /// # Safety
-/// `database` and `object` must be valid null-terminated C strings.
+/// `database` and `object` must be valid null-terminated C strings, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_identifier_new(
     database: *const c_char,
     object: *const c_char,
-) -> *mut paimon_identifier {
-    let db = CStr::from_ptr(database).to_string_lossy().into_owned();
-    let obj = CStr::from_ptr(object).to_string_lossy().into_owned();
+) -> paimon_result_identifier_new {
+    let db = match validate_cstr(database, "database") {
+        Ok(s) => s,
+        Err(e) => {
+            return paimon_result_identifier_new {
+                identifier: std::ptr::null_mut(),
+                error: e,
+            }
+        }
+    };
+    let obj = match validate_cstr(object, "object") {
+        Ok(s) => s,
+        Err(e) => {
+            return paimon_result_identifier_new {
+                identifier: std::ptr::null_mut(),
+                error: e,
+            }
+        }
+    };
     let wrapper = Box::new(paimon_identifier {
         inner: Box::into_raw(Box::new(Identifier::new(db, obj))) as *mut c_void,
     });
-    Box::into_raw(wrapper)
+    paimon_result_identifier_new {
+        identifier: Box::into_raw(wrapper),
+        error: std::ptr::null_mut(),
+    }
 }
 
 /// Free a paimon_identifier.

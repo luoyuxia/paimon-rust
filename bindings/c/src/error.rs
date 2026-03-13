@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::ffi::{c_char, CStr};
+
 use crate::types::paimon_bytes;
 
 /// Error codes for paimon C API.
@@ -79,3 +81,40 @@ pub unsafe extern "C" fn paimon_error_free(err: *mut paimon_error) {
 
 // Re-use the bytes free from types - but we need it here for the error drop
 use crate::types::paimon_bytes_free;
+
+/// Validate a C string pointer: checks for null and valid UTF-8.
+///
+/// Returns `Ok(String)` on success, or `Err(*mut paimon_error)` if the
+/// pointer is null or the string contains invalid UTF-8.
+///
+/// # Safety
+/// If `ptr` is non-null, it must point to a valid null-terminated C string.
+pub unsafe fn validate_cstr(ptr: *const c_char, name: &str) -> Result<String, *mut paimon_error> {
+    if ptr.is_null() {
+        return Err(paimon_error::new(
+            PaimonErrorCode::InvalidInput,
+            format!("null pointer passed for `{name}`"),
+        ));
+    }
+    CStr::from_ptr(ptr)
+        .to_str()
+        .map(|s| s.to_owned())
+        .map_err(|e| {
+            paimon_error::new(
+                PaimonErrorCode::InvalidInput,
+                format!("`{name}` is not valid UTF-8: {e}"),
+            )
+        })
+}
+
+/// Check that a pointer is non-null, returning an error if it is.
+pub fn check_non_null<T>(ptr: *const T, name: &str) -> Result<(), *mut paimon_error> {
+    if ptr.is_null() {
+        Err(paimon_error::new(
+            PaimonErrorCode::InvalidInput,
+            format!("null pointer passed for `{name}`"),
+        ))
+    } else {
+        Ok(())
+    }
+}

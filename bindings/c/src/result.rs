@@ -25,6 +25,12 @@ pub struct paimon_result_catalog_new {
 }
 
 #[repr(C)]
+pub struct paimon_result_identifier_new {
+    pub identifier: *mut paimon_identifier,
+    pub error: *mut paimon_error,
+}
+
+#[repr(C)]
 pub struct paimon_result_get_table {
     pub table: *mut paimon_table,
     pub error: *mut paimon_error,
@@ -37,16 +43,31 @@ pub struct paimon_result_new_read {
 }
 
 #[repr(C)]
+pub struct paimon_result_read_builder {
+    pub read_builder: *mut paimon_read_builder,
+    pub error: *mut paimon_error,
+}
+
+#[repr(C)]
+pub struct paimon_result_table_scan {
+    pub scan: *mut paimon_table_scan,
+    pub error: *mut paimon_error,
+}
+
+#[repr(C)]
 pub struct paimon_result_plan {
     pub plan: *mut paimon_plan,
     pub error: *mut paimon_error,
 }
 
 #[repr(C)]
-pub struct paimon_result_to_arrow {
-    /// Pointer to an array of paimon_arrow_batch.
-    pub batches: *mut paimon_arrow_batch,
-    /// Number of batches.
-    pub num_batches: usize,
+pub struct paimon_result_record_batch_reader {
+    pub reader: *mut paimon_record_batch_reader,
+    pub error: *mut paimon_error,
+}
+
+#[repr(C)]
+pub struct paimon_result_next_batch {
+    pub batch: paimon_arrow_batch,
     pub error: *mut paimon_error,
 }
