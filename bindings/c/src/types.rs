@@ -16,7 +16,6 @@
 // under the License.
 
 use std::ffi::c_void;
-use std::mem::ManuallyDrop;
 
 /// C-compatible byte buffer.
 #[repr(C)]
@@ -28,11 +27,10 @@ pub struct paimon_bytes {
 
 impl paimon_bytes {
     pub fn new(v: Vec<u8>) -> Self {
-        let mut v = ManuallyDrop::new(v);
-        Self {
-            data: v.as_mut_ptr(),
-            len: v.len(),
-        }
+        let boxed = v.into_boxed_slice();
+        let len = boxed.len();
+        let data = Box::into_raw(boxed) as *mut u8;
+        Self { data, len }
     }
 }
 
@@ -43,7 +41,9 @@ impl paimon_bytes {
 #[no_mangle]
 pub unsafe extern "C" fn paimon_bytes_free(bytes: paimon_bytes) {
     if !bytes.data.is_null() {
-        drop(Vec::from_raw_parts(bytes.data, bytes.len, bytes.len));
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            bytes.data, bytes.len,
+        )));
     }
 }
 
@@ -80,6 +80,11 @@ pub struct paimon_table_read {
 
 #[repr(C)]
 pub struct paimon_plan {
+    pub inner: *mut c_void,
+}
+
+#[repr(C)]
+pub struct paimon_record_batch_reader {
     pub inner: *mut c_void,
 }
 

@@ -16,15 +16,18 @@
 // under the License.
 
 use std::ffi::c_void;
-use std::mem::ManuallyDrop;
 
 use arrow_array::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
-use arrow_array::{Array, RecordBatch, StructArray};
-use paimon::table::Table;
+use arrow_array::{Array, StructArray};
+use futures::StreamExt;
+use paimon::table::{ArrowRecordBatchStream, Table};
 use paimon::Plan;
 
-use crate::error::paimon_error;
-use crate::result::{paimon_result_new_read, paimon_result_plan, paimon_result_to_arrow};
+use crate::error::{check_non_null, paimon_error};
+use crate::result::{
+    paimon_result_new_read, paimon_result_next_batch, paimon_result_plan,
+    paimon_result_read_builder, paimon_result_record_batch_reader, paimon_result_table_scan,
+};
 use crate::runtime;
 use crate::types::*;
 
@@ -59,13 +62,22 @@ pub unsafe extern "C" fn paimon_table_free(table: *mut paimon_table) {
 /// Create a new ReadBuilder from a Table.
 ///
 /// # Safety
-/// `table` must be a valid pointer from `paimon_catalog_get_table`.
+/// `table` must be a valid pointer from `paimon_catalog_get_table`, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_table_new_read_builder(
     table: *const paimon_table,
-) -> *mut paimon_read_builder {
+) -> paimon_result_read_builder {
+    if let Err(e) = check_non_null(table, "table") {
+        return paimon_result_read_builder {
+            read_builder: std::ptr::null_mut(),
+            error: e,
+        };
+    }
     let table_ref = &*((*table).inner as *const Table);
-    box_table_wrapper(table_ref, |inner| paimon_read_builder { inner })
+    paimon_result_read_builder {
+        read_builder: box_table_wrapper(table_ref, |inner| paimon_read_builder { inner }),
+        error: std::ptr::null_mut(),
+    }
 }
 
 // ======================= ReadBuilder ===============================
@@ -82,23 +94,38 @@ pub unsafe extern "C" fn paimon_read_builder_free(rb: *mut paimon_read_builder) 
 /// Create a new TableScan from a ReadBuilder.
 ///
 /// # Safety
-/// `rb` must be a valid pointer from `paimon_table_new_read_builder`.
+/// `rb` must be a valid pointer from `paimon_table_new_read_builder`, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_read_builder_new_scan(
     rb: *const paimon_read_builder,
-) -> *mut paimon_table_scan {
+) -> paimon_result_table_scan {
+    if let Err(e) = check_non_null(rb, "rb") {
+        return paimon_result_table_scan {
+            scan: std::ptr::null_mut(),
+            error: e,
+        };
+    }
     let table = &*((*rb).inner as *const Table);
-    box_table_wrapper(table, |inner| paimon_table_scan { inner })
+    paimon_result_table_scan {
+        scan: box_table_wrapper(table, |inner| paimon_table_scan { inner }),
+        error: std::ptr::null_mut(),
+    }
 }
 
 /// Create a new TableRead from a ReadBuilder.
 ///
 /// # Safety
-/// `rb` must be a valid pointer from `paimon_table_new_read_builder`.
+/// `rb` must be a valid pointer from `paimon_table_new_read_builder`, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_read_builder_new_read(
     rb: *const paimon_read_builder,
 ) -> paimon_result_new_read {
+    if let Err(e) = check_non_null(rb, "rb") {
+        return paimon_result_new_read {
+            read: std::ptr::null_mut(),
+            error: e,
+        };
+    }
     let table = &*((*rb).inner as *const Table);
     let rb_rust = table.new_read_builder();
     match rb_rust.new_read() {
@@ -130,11 +157,17 @@ pub unsafe extern "C" fn paimon_table_scan_free(scan: *mut paimon_table_scan) {
 /// Execute a scan plan to get splits.
 ///
 /// # Safety
-/// `scan` must be a valid pointer from `paimon_read_builder_new_scan`.
+/// `scan` must be a valid pointer from `paimon_read_builder_new_scan`, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_table_scan_plan(
     scan: *const paimon_table_scan,
 ) -> paimon_result_plan {
+    if let Err(e) = check_non_null(scan, "scan") {
+        return paimon_result_plan {
+            plan: std::ptr::null_mut(),
+            error: e,
+        };
+    }
     let table = &*((*scan).inner as *const Table);
     let rb = table.new_read_builder();
     let table_scan = rb.new_scan();
@@ -183,77 +216,155 @@ pub unsafe extern "C" fn paimon_table_read_free(read: *mut paimon_table_read) {
     free_table_wrapper(read, |r| r.inner);
 }
 
-/// Read table data as Arrow record batches via the Arrow C Data Interface (zero-copy).
+/// Read table data as Arrow record batches via a streaming reader.
 ///
-/// Returns an array of `paimon_arrow_batch`, each containing a heap-allocated
-/// ArrowArray and ArrowSchema pointer pair. After importing each batch (e.g.
-/// via `arrow::ImportRecordBatch`), call `paimon_arrow_batch_free` to free the
-/// container structs, then call `paimon_arrow_result_free` to free the array.
+/// Returns a `paimon_record_batch_reader` that yields one batch at a time
+/// via `paimon_record_batch_reader_next`. This avoids loading all batches
+/// into memory at once.
 ///
 /// # Safety
-/// `read` and `plan` must be valid pointers from previous paimon C calls.
+/// `read` and `plan` must be valid pointers from previous paimon C calls, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_table_read_to_arrow(
     read: *const paimon_table_read,
     plan: *const paimon_plan,
-) -> paimon_result_to_arrow {
+) -> paimon_result_record_batch_reader {
+    if let Err(e) = check_non_null(read, "read") {
+        return paimon_result_record_batch_reader {
+            reader: std::ptr::null_mut(),
+            error: e,
+        };
+    }
+    if let Err(e) = check_non_null(plan, "plan") {
+        return paimon_result_record_batch_reader {
+            reader: std::ptr::null_mut(),
+            error: e,
+        };
+    }
+
     let table = &*((*read).inner as *const Table);
     let plan_ref = &*((*plan).inner as *const Plan);
 
-    match export_batches(table, plan_ref) {
-        Ok((ptr, len)) => paimon_result_to_arrow {
-            batches: ptr,
-            num_batches: len,
-            error: std::ptr::null_mut(),
+    let rb = table.new_read_builder();
+    match rb.new_read() {
+        Ok(table_read) => match table_read.to_arrow(plan_ref.splits()) {
+            Ok(stream) => {
+                let reader = Box::new(stream);
+                let wrapper = Box::new(paimon_record_batch_reader {
+                    inner: Box::into_raw(reader) as *mut c_void,
+                });
+                paimon_result_record_batch_reader {
+                    reader: Box::into_raw(wrapper),
+                    error: std::ptr::null_mut(),
+                }
+            }
+            Err(e) => paimon_result_record_batch_reader {
+                reader: std::ptr::null_mut(),
+                error: paimon_error::from_paimon(e),
+            },
         },
-        Err(e) => paimon_result_to_arrow {
-            batches: std::ptr::null_mut(),
-            num_batches: 0,
+        Err(e) => paimon_result_record_batch_reader {
+            reader: std::ptr::null_mut(),
             error: paimon_error::from_paimon(e),
         },
     }
 }
 
-fn export_batches(table: &Table, plan: &Plan) -> paimon::Result<(*mut paimon_arrow_batch, usize)> {
-    let rb = table.new_read_builder();
-    let read = rb.new_read()?;
-    let stream = read.to_arrow(plan.splits())?;
+// ======================= RecordBatchReader ===============================
 
-    let batches: Vec<RecordBatch> = runtime().block_on(async {
-        use futures::TryStreamExt;
-        stream.try_collect().await
-    })?;
-
-    let mut ffi_batches = Vec::with_capacity(batches.len());
-    for batch in batches {
-        let schema = batch.schema();
-        let struct_array = StructArray::from(batch);
-        let ffi_array = FFI_ArrowArray::new(&struct_array.to_data());
-        let ffi_schema = FFI_ArrowSchema::try_from(schema.as_ref()).map_err(|e| {
-            paimon::Error::UnexpectedError {
-                message: format!("Failed to export Arrow schema: {e}"),
-                source: Some(Box::new(e)),
-            }
-        })?;
-
-        let array_ptr = Box::into_raw(Box::new(ffi_array)) as *mut c_void;
-        let schema_ptr = Box::into_raw(Box::new(ffi_schema)) as *mut c_void;
-
-        ffi_batches.push(paimon_arrow_batch {
-            array: array_ptr,
-            schema: schema_ptr,
-        });
+/// Get the next Arrow record batch from the reader.
+///
+/// When the stream is exhausted, both `batch.array` and `batch.schema` will
+/// be null. On error, `error` will be non-null.
+///
+/// After importing each batch, call `paimon_arrow_batch_free` to free the
+/// ArrowArray and ArrowSchema container structs.
+///
+/// # Safety
+/// `reader` must be a valid pointer from `paimon_table_read_to_arrow`, or null (returns error).
+#[no_mangle]
+pub unsafe extern "C" fn paimon_record_batch_reader_next(
+    reader: *mut paimon_record_batch_reader,
+) -> paimon_result_next_batch {
+    if let Err(e) = check_non_null(reader, "reader") {
+        return paimon_result_next_batch {
+            batch: paimon_arrow_batch {
+                array: std::ptr::null_mut(),
+                schema: std::ptr::null_mut(),
+            },
+            error: e,
+        };
     }
 
-    let len = ffi_batches.len();
-    let ptr = ManuallyDrop::new(ffi_batches).as_mut_ptr();
-    Ok((ptr, len))
+    let stream = &mut *((*reader).inner as *mut ArrowRecordBatchStream);
+
+    match runtime().block_on(stream.next()) {
+        Some(Ok(batch)) => {
+            let schema = batch.schema();
+            let struct_array = StructArray::from(batch);
+            let ffi_array = FFI_ArrowArray::new(&struct_array.to_data());
+            let ffi_schema = match FFI_ArrowSchema::try_from(schema.as_ref()) {
+                Ok(s) => s,
+                Err(e) => {
+                    return paimon_result_next_batch {
+                        batch: paimon_arrow_batch {
+                            array: std::ptr::null_mut(),
+                            schema: std::ptr::null_mut(),
+                        },
+                        error: paimon_error::from_paimon(paimon::Error::UnexpectedError {
+                            message: format!("Failed to export Arrow schema: {e}"),
+                            source: Some(Box::new(e)),
+                        }),
+                    };
+                }
+            };
+
+            let array_ptr = Box::into_raw(Box::new(ffi_array)) as *mut c_void;
+            let schema_ptr = Box::into_raw(Box::new(ffi_schema)) as *mut c_void;
+
+            paimon_result_next_batch {
+                batch: paimon_arrow_batch {
+                    array: array_ptr,
+                    schema: schema_ptr,
+                },
+                error: std::ptr::null_mut(),
+            }
+        }
+        Some(Err(e)) => paimon_result_next_batch {
+            batch: paimon_arrow_batch {
+                array: std::ptr::null_mut(),
+                schema: std::ptr::null_mut(),
+            },
+            error: paimon_error::from_paimon(e),
+        },
+        None => paimon_result_next_batch {
+            batch: paimon_arrow_batch {
+                array: std::ptr::null_mut(),
+                schema: std::ptr::null_mut(),
+            },
+            error: std::ptr::null_mut(),
+        },
+    }
+}
+
+/// Free a paimon_record_batch_reader.
+///
+/// # Safety
+/// Only call with a reader returned from `paimon_table_read_to_arrow`.
+#[no_mangle]
+pub unsafe extern "C" fn paimon_record_batch_reader_free(reader: *mut paimon_record_batch_reader) {
+    if !reader.is_null() {
+        let wrapper = Box::from_raw(reader);
+        if !wrapper.inner.is_null() {
+            drop(Box::from_raw(wrapper.inner as *mut ArrowRecordBatchStream));
+        }
+    }
 }
 
 /// Free the ArrowArray and ArrowSchema container structs for a single batch.
 ///
 /// # Safety
-/// `batch` must contain valid pointers returned by `paimon_table_read_to_arrow`.
+/// `batch` must contain valid pointers returned by `paimon_record_batch_reader_next`.
 #[no_mangle]
 pub unsafe extern "C" fn paimon_arrow_batch_free(batch: paimon_arrow_batch) {
     if !batch.array.is_null() {
@@ -261,19 +372,5 @@ pub unsafe extern "C" fn paimon_arrow_batch_free(batch: paimon_arrow_batch) {
     }
     if !batch.schema.is_null() {
         drop(Box::from_raw(batch.schema as *mut FFI_ArrowSchema));
-    }
-}
-
-/// Free the batches array returned by `paimon_table_read_to_arrow`.
-///
-/// # Safety
-/// `batches` and `num_batches` must come from a `paimon_result_to_arrow`.
-#[no_mangle]
-pub unsafe extern "C" fn paimon_arrow_result_free(
-    batches: *mut paimon_arrow_batch,
-    num_batches: usize,
-) {
-    if !batches.is_null() {
-        drop(Vec::from_raw_parts(batches, num_batches, num_batches));
     }
 }

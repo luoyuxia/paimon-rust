@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_void};
 
 use paimon::catalog::Identifier;
 use paimon::{Catalog, FileSystemCatalog};
 
-use crate::error::paimon_error;
+use crate::error::{check_non_null, paimon_error, validate_cstr};
 use crate::result::{paimon_result_catalog_new, paimon_result_get_table};
 use crate::runtime;
 use crate::types::{paimon_catalog, paimon_table};
@@ -28,10 +28,18 @@ use crate::types::{paimon_catalog, paimon_table};
 /// Create a new FileSystemCatalog.
 ///
 /// # Safety
-/// `warehouse` must be a valid null-terminated C string.
+/// `warehouse` must be a valid null-terminated C string, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_catalog_new(warehouse: *const c_char) -> paimon_result_catalog_new {
-    let warehouse_str = CStr::from_ptr(warehouse).to_string_lossy().into_owned();
+    let warehouse_str = match validate_cstr(warehouse, "warehouse") {
+        Ok(s) => s,
+        Err(e) => {
+            return paimon_result_catalog_new {
+                catalog: std::ptr::null_mut(),
+                error: e,
+            }
+        }
+    };
     match FileSystemCatalog::new(warehouse_str) {
         Ok(catalog) => {
             let wrapper = Box::new(paimon_catalog {
@@ -66,12 +74,25 @@ pub unsafe extern "C" fn paimon_catalog_free(catalog: *mut paimon_catalog) {
 /// Get a table from the catalog.
 ///
 /// # Safety
-/// `catalog` and `identifier` must be valid pointers from previous paimon C calls.
+/// `catalog` and `identifier` must be valid pointers from previous paimon C calls, or null (returns error).
 #[no_mangle]
 pub unsafe extern "C" fn paimon_catalog_get_table(
     catalog: *const paimon_catalog,
     identifier: *const crate::types::paimon_identifier,
 ) -> paimon_result_get_table {
+    if let Err(e) = check_non_null(catalog, "catalog") {
+        return paimon_result_get_table {
+            table: std::ptr::null_mut(),
+            error: e,
+        };
+    }
+    if let Err(e) = check_non_null(identifier, "identifier") {
+        return paimon_result_get_table {
+            table: std::ptr::null_mut(),
+            error: e,
+        };
+    }
+
     let catalog_ref = &*((*catalog).inner as *const FileSystemCatalog);
     let identifier_ref = &*((*identifier).inner as *const Identifier);
 
