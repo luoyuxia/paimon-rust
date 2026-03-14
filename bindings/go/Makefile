@@ -50,7 +50,7 @@ build:
 
 # Run Go integration tests.
 # Requires test data: run 'make docker-up' from the repo root first.
-# CGO is needed by arrow-go's cdata package used in tests.
+# CGO is needed by arrow-go's cdata package (imported by the main paimon package).
 PAIMON_TEST_WAREHOUSE ?= /tmp/paimon-warehouse
 
 test: build

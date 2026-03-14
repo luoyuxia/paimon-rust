@@ -21,6 +21,7 @@ package paimon
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
@@ -28,9 +29,10 @@ import (
 
 // Identifier identifies a table by database and object name.
 type Identifier struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonIdentifier
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonIdentifier
+	closeOnce sync.Once
 }
 
 // NewIdentifier creates a new Identifier with the given database and object name.
@@ -44,10 +46,12 @@ func (p *Paimon) NewIdentifier(database, object string) (*Identifier, error) {
 	return &Identifier{ctx: p.ctx, lib: p.lib, inner: inner}, nil
 }
 
-// Close releases the identifier resources.
+// Close releases the identifier resources. Safe to call multiple times.
 func (id *Identifier) Close() {
-	ffiIdentifierFree.symbol(id.ctx)(id.inner)
-	id.lib.release()
+	id.closeOnce.Do(func() {
+		ffiIdentifierFree.symbol(id.ctx)(id.inner)
+		id.lib.release()
+	})
 }
 
 var ffiIdentifierNew = newFFI(ffiOpts{

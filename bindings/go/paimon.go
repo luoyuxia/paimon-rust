@@ -19,9 +19,12 @@
 
 // Package paimon provides a Go binding for Apache Paimon Rust.
 //
-// This binding uses purego and libffi to call into the paimon-c shared library
-// without requiring CGO. The pre-built shared library is embedded in the
-// package and automatically loaded at runtime — no manual build step needed.
+// This binding uses purego and libffi to call into the paimon-c shared library.
+// The pre-built shared library is embedded in the package and automatically
+// loaded at runtime — no manual build step needed.
+//
+// Note: reading Arrow record batches (via RecordBatchReader.NextRecord)
+// requires CGO because it imports the arrow-go cdata package.
 //
 // Basic usage:
 //
@@ -37,6 +40,7 @@ package paimon
 
 import (
 	"context"
+	"sync"
 )
 
 // Paimon is the entry point for all paimon operations.
@@ -47,8 +51,9 @@ import (
 // reference-counted and will not be unloaded until all derived objects
 // are closed.
 type Paimon struct {
-	ctx context.Context
-	lib *libRef
+	ctx       context.Context
+	lib       *libRef
+	closeOnce sync.Once
 }
 
 // Open loads the embedded paimon-c shared library and returns a Paimon instance.
@@ -73,6 +78,9 @@ func OpenLibrary(path string) (*Paimon, error) {
 
 // Close releases this Paimon instance's reference to the shared library.
 // The library is unloaded once all derived objects are also closed.
+// Close is safe to call multiple times.
 func (p *Paimon) Close() {
-	p.lib.release()
+	p.closeOnce.Do(func() {
+		p.lib.release()
+	})
 }

@@ -21,6 +21,7 @@ package paimon
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
@@ -28,15 +29,18 @@ import (
 
 // ReadBuilder creates TableScan and TableRead instances.
 type ReadBuilder struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonReadBuilder
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonReadBuilder
+	closeOnce sync.Once
 }
 
-// Close releases the read builder resources.
+// Close releases the read builder resources. Safe to call multiple times.
 func (rb *ReadBuilder) Close() {
-	ffiReadBuilderFree.symbol(rb.ctx)(rb.inner)
-	rb.lib.release()
+	rb.closeOnce.Do(func() {
+		ffiReadBuilderFree.symbol(rb.ctx)(rb.inner)
+		rb.lib.release()
+	})
 }
 
 // NewScan creates a TableScan for planning which data files to read.

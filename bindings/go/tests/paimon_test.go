@@ -93,7 +93,7 @@ func TestReadLogTable(t *testing.T) {
 	}
 	defer read.Close()
 
-	reader, err := read.ToRecordBatchReader(plan)
+	reader, err := read.ToRecordBatchReader(plan.Splits())
 	if err != nil {
 		t.Fatalf("Failed to read arrow: %v", err)
 	}

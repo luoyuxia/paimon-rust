@@ -21,6 +21,7 @@ package paimon
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
@@ -28,15 +29,40 @@ import (
 
 // Plan holds the scan result containing data splits to read.
 type Plan struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonPlan
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonPlan
+	closeOnce sync.Once
 }
 
-// Close releases the plan resources.
+// Close releases the plan resources. Safe to call multiple times.
 func (p *Plan) Close() {
-	ffiPlanFree.symbol(p.ctx)(p.inner)
-	p.lib.release()
+	p.closeOnce.Do(func() {
+		ffiPlanFree.symbol(p.ctx)(p.inner)
+		p.lib.release()
+	})
+}
+
+// DataSplit references a single data split inside a Plan.
+// The parent Plan must remain open while the DataSplit is in use.
+type DataSplit struct {
+	plan  *Plan
+	index int
+}
+
+// NumSplits returns the number of data splits in the plan.
+func (p *Plan) NumSplits() int {
+	return ffiPlanNumSplits.symbol(p.ctx)(p.inner)
+}
+
+// Splits returns all data splits in the plan.
+func (p *Plan) Splits() []DataSplit {
+	n := p.NumSplits()
+	splits := make([]DataSplit, n)
+	for i := range splits {
+		splits[i] = DataSplit{plan: p, index: i}
+	}
+	return splits
 }
 
 var ffiPlanFree = newFFI(ffiOpts{
@@ -49,5 +75,20 @@ var ffiPlanFree = newFFI(ffiOpts{
 			nil,
 			unsafe.Pointer(&plan),
 		)
+	}
+})
+
+var ffiPlanNumSplits = newFFI(ffiOpts{
+	sym:    "paimon_plan_num_splits",
+	rType:  &ffi.TypePointer, // usize == pointer-sized on 64-bit
+	aTypes: []*ffi.Type{&ffi.TypePointer},
+}, func(_ context.Context, ffiCall ffiCall) func(plan *paimonPlan) int {
+	return func(plan *paimonPlan) int {
+		var count uintptr
+		ffiCall(
+			unsafe.Pointer(&count),
+			unsafe.Pointer(&plan),
+		)
+		return int(count)
 	}
 })

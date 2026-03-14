@@ -21,8 +21,10 @@ package paimon
 
 import (
 	"context"
+	"errors"
 	"io"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -32,15 +34,18 @@ import (
 
 // TableRead reads data from a table given a plan of splits.
 type TableRead struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonTableRead
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonTableRead
+	closeOnce sync.Once
 }
 
-// Close releases the table read resources.
+// Close releases the table read resources. Safe to call multiple times.
 func (tr *TableRead) Close() {
-	ffiTableReadFree.symbol(tr.ctx)(tr.inner)
-	tr.lib.release()
+	tr.closeOnce.Do(func() {
+		ffiTableReadFree.symbol(tr.ctx)(tr.inner)
+		tr.lib.release()
+	})
 }
 
 // RecordBatchReader iterates over Arrow record batches one at a time via
@@ -56,9 +61,10 @@ func (tr *TableRead) Close() {
 //	    record.Release()
 //	}
 type RecordBatchReader struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonRecordBatchReader
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonRecordBatchReader
+	closeOnce sync.Once
 }
 
 // NextRecord returns the next Arrow record, or io.EOF when iteration is
@@ -95,18 +101,46 @@ func (r *RecordBatchReader) next() (*arrowBatch, error) {
 	return ab, nil
 }
 
-// Close releases the underlying C record batch reader.
+// Close releases the underlying C record batch reader. Safe to call multiple times.
 func (r *RecordBatchReader) Close() {
-	ffiRecordBatchReaderFree.symbol(r.ctx)(r.inner)
-	r.lib.release()
+	r.closeOnce.Do(func() {
+		ffiRecordBatchReaderFree.symbol(r.ctx)(r.inner)
+		r.lib.release()
+	})
 }
 
 // ToRecordBatchReader creates a RecordBatchReader that lazily reads Arrow record batches
-// from the given plan via the Arrow C Data Interface (zero-copy).
+// from the given splits via the Arrow C Data Interface (zero-copy).
+//
+// All splits must originate from the same Plan and form a contiguous index
+// range (as returned by Plan.Splits or a contiguous sub-slice of it).
+// The parent Plan must remain open while the reader is in use.
 //
 // The caller must call Close on the returned reader when done.
-func (tr *TableRead) ToRecordBatchReader(plan *Plan) (*RecordBatchReader, error) {
-	reader, err := ffiTableReadToArrow.symbol(tr.ctx)(tr.inner, plan.inner)
+func (tr *TableRead) ToRecordBatchReader(splits []DataSplit) (*RecordBatchReader, error) {
+	if len(splits) == 0 {
+		return nil, errors.New("paimon: no splits provided")
+	}
+	plan := splits[0].plan
+	minIdx := splits[0].index
+	maxIdx := splits[0].index
+	for _, s := range splits[1:] {
+		if s.plan != plan {
+			return nil, errors.New("paimon: all splits must be from the same plan")
+		}
+		if s.index < minIdx {
+			minIdx = s.index
+		}
+		if s.index > maxIdx {
+			maxIdx = s.index
+		}
+	}
+	if maxIdx-minIdx+1 != len(splits) {
+		return nil, errors.New("paimon: splits must be contiguous")
+	}
+	offset := uintptr(minIdx)
+	length := uintptr(len(splits))
+	reader, err := ffiTableReadToArrow.symbol(tr.ctx)(tr.inner, plan.inner, offset, length)
 	if err != nil {
 		return nil, err
 	}
@@ -130,14 +164,16 @@ var ffiTableReadFree = newFFI(ffiOpts{
 var ffiTableReadToArrow = newFFI(ffiOpts{
 	sym:    "paimon_table_read_to_arrow",
 	rType:  &typeResultRecordBatchReader,
-	aTypes: []*ffi.Type{&ffi.TypePointer, &ffi.TypePointer},
-}, func(ctx context.Context, ffiCall ffiCall) func(read *paimonTableRead, plan *paimonPlan) (*paimonRecordBatchReader, error) {
-	return func(read *paimonTableRead, plan *paimonPlan) (*paimonRecordBatchReader, error) {
+	aTypes: []*ffi.Type{&ffi.TypePointer, &ffi.TypePointer, &ffi.TypePointer, &ffi.TypePointer},
+}, func(ctx context.Context, ffiCall ffiCall) func(read *paimonTableRead, plan *paimonPlan, offset uintptr, length uintptr) (*paimonRecordBatchReader, error) {
+	return func(read *paimonTableRead, plan *paimonPlan, offset uintptr, length uintptr) (*paimonRecordBatchReader, error) {
 		var result resultRecordBatchReader
 		ffiCall(
 			unsafe.Pointer(&result),
 			unsafe.Pointer(&read),
 			unsafe.Pointer(&plan),
+			unsafe.Pointer(&offset),
+			unsafe.Pointer(&length),
 		)
 		if result.error != nil {
 			return nil, parseError(ctx, result.error)

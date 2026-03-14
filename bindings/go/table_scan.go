@@ -21,6 +21,7 @@ package paimon
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
@@ -28,15 +29,18 @@ import (
 
 // TableScan scans a table and produces a Plan containing data splits.
 type TableScan struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonTableScan
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonTableScan
+	closeOnce sync.Once
 }
 
-// Close releases the table scan resources.
+// Close releases the table scan resources. Safe to call multiple times.
 func (ts *TableScan) Close() {
-	ffiTableScanFree.symbol(ts.ctx)(ts.inner)
-	ts.lib.release()
+	ts.closeOnce.Do(func() {
+		ffiTableScanFree.symbol(ts.ctx)(ts.inner)
+		ts.lib.release()
+	})
 }
 
 // Plan executes the scan and returns a Plan containing data splits to read.

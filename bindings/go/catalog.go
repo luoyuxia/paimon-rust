@@ -21,6 +21,7 @@ package paimon
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
@@ -28,9 +29,10 @@ import (
 
 // Catalog wraps a paimon FileSystemCatalog.
 type Catalog struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonCatalog
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonCatalog
+	closeOnce sync.Once
 }
 
 // NewFileSystemCatalog creates a new FileSystemCatalog for the given warehouse path.
@@ -44,10 +46,12 @@ func (p *Paimon) NewFileSystemCatalog(warehouse string) (*Catalog, error) {
 	return &Catalog{ctx: p.ctx, lib: p.lib, inner: inner}, nil
 }
 
-// Close releases the catalog resources.
+// Close releases the catalog resources. Safe to call multiple times.
 func (c *Catalog) Close() {
-	ffiCatalogFree.symbol(c.ctx)(c.inner)
-	c.lib.release()
+	c.closeOnce.Do(func() {
+		ffiCatalogFree.symbol(c.ctx)(c.inner)
+		c.lib.release()
+	})
 }
 
 // GetTable retrieves a table from the catalog using the given identifier.

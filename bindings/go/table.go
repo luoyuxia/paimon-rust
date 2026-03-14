@@ -21,6 +21,7 @@ package paimon
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
@@ -28,15 +29,18 @@ import (
 
 // Table represents a paimon table.
 type Table struct {
-	ctx   context.Context
-	lib   *libRef
-	inner *paimonTable
+	ctx       context.Context
+	lib       *libRef
+	inner     *paimonTable
+	closeOnce sync.Once
 }
 
-// Close releases the table resources.
+// Close releases the table resources. Safe to call multiple times.
 func (t *Table) Close() {
-	ffiTableFree.symbol(t.ctx)(t.inner)
-	t.lib.release()
+	t.closeOnce.Do(func() {
+		ffiTableFree.symbol(t.ctx)(t.inner)
+		t.lib.release()
+	})
 }
 
 // NewReadBuilder creates a ReadBuilder for this table.
