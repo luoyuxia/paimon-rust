@@ -29,12 +29,14 @@ import (
 // ReadBuilder creates TableScan and TableRead instances.
 type ReadBuilder struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonReadBuilder
 }
 
 // Close releases the read builder resources.
 func (rb *ReadBuilder) Close() {
 	ffiReadBuilderFree.symbol(rb.ctx)(rb.inner)
+	rb.lib.release()
 }
 
 // NewScan creates a TableScan for planning which data files to read.
@@ -44,7 +46,8 @@ func (rb *ReadBuilder) NewScan() (*TableScan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TableScan{ctx: rb.ctx, inner: inner}, nil
+	rb.lib.acquire()
+	return &TableScan{ctx: rb.ctx, lib: rb.lib, inner: inner}, nil
 }
 
 // NewRead creates a TableRead for reading data from splits.
@@ -54,7 +57,8 @@ func (rb *ReadBuilder) NewRead() (*TableRead, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TableRead{ctx: rb.ctx, inner: inner}, nil
+	rb.lib.acquire()
+	return &TableRead{ctx: rb.ctx, lib: rb.lib, inner: inner}, nil
 }
 
 var ffiReadBuilderFree = newFFI(ffiOpts{

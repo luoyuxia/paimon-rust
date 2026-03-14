@@ -22,10 +22,33 @@ package paimon
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
 )
+
+// libRef is an atomic reference counter for the loaded shared library.
+// Every object that may call FFI (including during Close/Release) must
+// hold a reference. The library is freed only when the count drops to zero.
+type libRef struct {
+	count atomic.Int32
+	lib   uintptr
+}
+
+func newLibRef(lib uintptr) *libRef {
+	r := &libRef{lib: lib}
+	r.count.Store(1)
+	return r
+}
+
+func (r *libRef) acquire() { r.count.Add(1) }
+
+func (r *libRef) release() {
+	if r.count.Add(-1) == 0 {
+		_ = FreeLibrary(r.lib)
+	}
+}
 
 type ffiOpts struct {
 	sym    contextKey
@@ -85,20 +108,18 @@ func (f *FFI[T]) withFFI(ctx context.Context, lib uintptr) (context.Context, err
 
 var withFFIs []contextWithFFI
 
-func newContext(path string) (ctx context.Context, cancel context.CancelFunc, err error) {
-	lib, err := LoadLibrary(path)
+func newContext(path string) (ctx context.Context, lib *libRef, err error) {
+	handle, err := LoadLibrary(path)
 	if err != nil {
 		return
 	}
 	ctx = context.Background()
 	for _, withFFI := range withFFIs {
-		ctx, err = withFFI(ctx, lib)
+		ctx, err = withFFI(ctx, handle)
 		if err != nil {
 			return
 		}
 	}
-	cancel = func() {
-		_ = FreeLibrary(lib)
-	}
+	lib = newLibRef(handle)
 	return
 }

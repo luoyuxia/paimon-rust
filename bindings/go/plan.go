@@ -29,12 +29,14 @@ import (
 // Plan holds the scan result containing data splits to read.
 type Plan struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonPlan
 }
 
 // Close releases the plan resources.
 func (p *Plan) Close() {
 	ffiPlanFree.symbol(p.ctx)(p.inner)
+	p.lib.release()
 }
 
 var ffiPlanFree = newFFI(ffiOpts{

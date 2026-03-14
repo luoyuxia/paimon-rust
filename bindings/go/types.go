@@ -21,6 +21,7 @@ package paimon
 
 import (
 	"context"
+	"runtime"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
@@ -214,17 +215,23 @@ type resultRecordBatchReader struct {
 	error  *paimonError
 }
 
-// ArrowBatch holds a single Arrow record batch via the Arrow C Data Interface.
-// Array and Schema are pointers to heap-allocated ArrowArray and ArrowSchema structs.
-// The container structs are freed automatically by the GC.
-type ArrowBatch struct {
-	ctx    context.Context
-	Array  unsafe.Pointer
-	Schema unsafe.Pointer
+// arrowBatch holds a single Arrow record batch via the Arrow C Data Interface.
+type arrowBatch struct {
+	ctx      context.Context
+	lib      *libRef
+	array    unsafe.Pointer
+	schema   unsafe.Pointer
+	released bool
 }
 
-func (b *ArrowBatch) free() {
-	ffiArrowBatchFree.symbol(b.ctx)(b.Array, b.Schema)
+func (b *arrowBatch) release() {
+	if b.released {
+		return
+	}
+	b.released = true
+	runtime.SetFinalizer(b, nil)
+	ffiArrowBatchFree.symbol(b.ctx)(b.array, b.schema)
+	b.lib.release()
 }
 
 type resultNextBatch struct {

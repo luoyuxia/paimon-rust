@@ -29,12 +29,14 @@ import (
 // TableScan scans a table and produces a Plan containing data splits.
 type TableScan struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonTableScan
 }
 
 // Close releases the table scan resources.
 func (ts *TableScan) Close() {
 	ffiTableScanFree.symbol(ts.ctx)(ts.inner)
+	ts.lib.release()
 }
 
 // Plan executes the scan and returns a Plan containing data splits to read.
@@ -44,7 +46,8 @@ func (ts *TableScan) Plan() (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Plan{ctx: ts.ctx, inner: inner}, nil
+	ts.lib.acquire()
+	return &Plan{ctx: ts.ctx, lib: ts.lib, inner: inner}, nil
 }
 
 var ffiTableScanFree = newFFI(ffiOpts{

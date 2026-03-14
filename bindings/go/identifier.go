@@ -29,6 +29,7 @@ import (
 // Identifier identifies a table by database and object name.
 type Identifier struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonIdentifier
 }
 
@@ -39,12 +40,14 @@ func (p *Paimon) NewIdentifier(database, object string) (*Identifier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Identifier{ctx: p.ctx, inner: inner}, nil
+	p.lib.acquire()
+	return &Identifier{ctx: p.ctx, lib: p.lib, inner: inner}, nil
 }
 
 // Close releases the identifier resources.
 func (id *Identifier) Close() {
 	ffiIdentifierFree.symbol(id.ctx)(id.inner)
+	id.lib.release()
 }
 
 var ffiIdentifierNew = newFFI(ffiOpts{

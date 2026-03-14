@@ -21,73 +21,97 @@ package paimon
 
 import (
 	"context"
+	"io"
 	"runtime"
 	"unsafe"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/cdata"
 	"github.com/jupiterrider/ffi"
 )
 
 // TableRead reads data from a table given a plan of splits.
 type TableRead struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonTableRead
 }
 
 // Close releases the table read resources.
 func (tr *TableRead) Close() {
 	ffiTableReadFree.symbol(tr.ctx)(tr.inner)
+	tr.lib.release()
 }
 
 // RecordBatchReader iterates over Arrow record batches one at a time via
-// the Arrow C Data Interface (zero-copy). Call Next to advance and Close
-// when done.
+// the Arrow C Data Interface (zero-copy). Call NextRecord to advance and
+// Close when done.
 //
-//	reader, _ := read.ToArrow(plan)
+//	reader, _ := read.ToRecordBatchReader(plan)
 //	defer reader.Close()
 //	for {
-//	    batch, err := reader.Next()
-//	    if batch == nil { break }
-//	    record, _ := cdata.ImportCRecordBatch(
-//	        (*cdata.CArrowArray)(batch.Array),
-//	        (*cdata.CArrowSchema)(batch.Schema),
-//	    )
+//	    record, err := reader.NextRecord()
+//	    if err != nil { break } // io.EOF at end
 //	    // use record ...
 //	    record.Release()
 //	}
 type RecordBatchReader struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonRecordBatchReader
 }
 
-// Next returns the next ArrowBatch, or (nil, nil) when iteration is complete.
-func (r *RecordBatchReader) Next() (*ArrowBatch, error) {
+// NextRecord returns the next Arrow record, or io.EOF when iteration is
+// complete. The underlying C batch is imported via the Arrow C Data Interface
+// and released automatically — the caller only needs to call Release on the
+// returned arrow.Record when done.
+func (r *RecordBatchReader) NextRecord() (arrow.Record, error) {
+	batch, err := r.next()
+	if err != nil {
+		return nil, err
+	}
+	record, err := cdata.ImportCRecordBatch(
+		(*cdata.CArrowArray)(batch.array),
+		(*cdata.CArrowSchema)(batch.schema),
+	)
+	batch.release()
+	if err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
+func (r *RecordBatchReader) next() (*arrowBatch, error) {
 	array, schema, err := ffiRecordBatchReaderNext.symbol(r.ctx)(r.inner)
 	if err != nil {
 		return nil, err
 	}
 	if array == nil && schema == nil {
-		return nil, nil
+		return nil, io.EOF
 	}
-	ab := &ArrowBatch{ctx: r.ctx, Array: array, Schema: schema}
-	runtime.SetFinalizer(ab, (*ArrowBatch).free)
+	r.lib.acquire()
+	ab := &arrowBatch{ctx: r.ctx, lib: r.lib, array: array, schema: schema}
+	runtime.SetFinalizer(ab, (*arrowBatch).release)
 	return ab, nil
 }
 
 // Close releases the underlying C record batch reader.
 func (r *RecordBatchReader) Close() {
 	ffiRecordBatchReaderFree.symbol(r.ctx)(r.inner)
+	r.lib.release()
 }
 
-// ToArrow creates a RecordBatchReader that lazily reads Arrow record batches
+// ToRecordBatchReader creates a RecordBatchReader that lazily reads Arrow record batches
 // from the given plan via the Arrow C Data Interface (zero-copy).
 //
 // The caller must call Close on the returned reader when done.
-func (tr *TableRead) ToArrow(plan *Plan) (*RecordBatchReader, error) {
+func (tr *TableRead) ToRecordBatchReader(plan *Plan) (*RecordBatchReader, error) {
 	reader, err := ffiTableReadToArrow.symbol(tr.ctx)(tr.inner, plan.inner)
 	if err != nil {
 		return nil, err
 	}
-	return &RecordBatchReader{ctx: tr.ctx, inner: reader}, nil
+	tr.lib.acquire()
+	return &RecordBatchReader{ctx: tr.ctx, lib: tr.lib, inner: reader}, nil
 }
 
 var ffiTableReadFree = newFFI(ffiOpts{

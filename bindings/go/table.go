@@ -29,22 +29,25 @@ import (
 // Table represents a paimon table.
 type Table struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonTable
 }
 
 // Close releases the table resources.
 func (t *Table) Close() {
 	ffiTableFree.symbol(t.ctx)(t.inner)
+	t.lib.release()
 }
 
 // NewReadBuilder creates a ReadBuilder for this table.
-func (t *Table) NewReadBuilder() *ReadBuilder {
+func (t *Table) NewReadBuilder() (*ReadBuilder, error) {
 	createFn := ffiTableNewReadBuilder.symbol(t.ctx)
 	inner, err := createFn(t.inner)
 	if err != nil {
-		panic("paimon: NewReadBuilder called on invalid table: " + err.Error())
+		return nil, err
 	}
-	return &ReadBuilder{ctx: t.ctx, inner: inner}
+	t.lib.acquire()
+	return &ReadBuilder{ctx: t.ctx, lib: t.lib, inner: inner}, nil
 }
 
 var ffiTableFree = newFFI(ffiOpts{

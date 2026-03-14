@@ -20,12 +20,13 @@
 package paimon_test
 
 import (
+	"errors"
+	"io"
 	"os"
 	"sort"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/cdata"
 	paimon "github.com/apache/paimon-rust/bindings/go"
 )
 
@@ -68,7 +69,10 @@ func TestReadLogTable(t *testing.T) {
 	}
 	defer table.Close()
 
-	readBuilder := table.NewReadBuilder()
+	readBuilder, err := table.NewReadBuilder()
+	if err != nil {
+		t.Fatalf("Failed to create read builder: %v", err)
+	}
 	defer readBuilder.Close()
 
 	scan, err := readBuilder.NewScan()
@@ -89,7 +93,7 @@ func TestReadLogTable(t *testing.T) {
 	}
 	defer read.Close()
 
-	reader, err := read.ToArrow(plan)
+	reader, err := read.ToRecordBatchReader(plan)
 	if err != nil {
 		t.Fatalf("Failed to read arrow: %v", err)
 	}
@@ -105,25 +109,18 @@ func TestReadLogTable(t *testing.T) {
 	var rows []row
 	batchIdx := 0
 	for {
-		batch, err := reader.Next()
-		if err != nil {
-			t.Fatalf("Batch %d: failed to read next batch: %v", batchIdx, err)
-		}
-		if batch == nil {
+		record, err := reader.NextRecord()
+		if errors.Is(err, io.EOF) {
 			break
 		}
-
-		record, err := cdata.ImportCRecordBatch(
-			(*cdata.CArrowArray)(batch.Array),
-			(*cdata.CArrowSchema)(batch.Schema),
-		)
 		if err != nil {
-			t.Fatalf("Batch %d: failed to import record batch: %v", batchIdx, err)
+			t.Fatalf("Batch %d: failed to read next record: %v", batchIdx, err)
 		}
 
 		idIdx := record.Schema().FieldIndices("id")
 		nameIdx := record.Schema().FieldIndices("name")
 		if len(idIdx) == 0 || len(nameIdx) == 0 {
+			record.Release()
 			t.Fatalf("Batch %d: missing expected columns (id, name) in schema: %s", batchIdx, record.Schema())
 		}
 

@@ -29,6 +29,7 @@ import (
 // Catalog wraps a paimon FileSystemCatalog.
 type Catalog struct {
 	ctx   context.Context
+	lib   *libRef
 	inner *paimonCatalog
 }
 
@@ -39,12 +40,14 @@ func (p *Paimon) NewFileSystemCatalog(warehouse string) (*Catalog, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Catalog{ctx: p.ctx, inner: inner}, nil
+	p.lib.acquire()
+	return &Catalog{ctx: p.ctx, lib: p.lib, inner: inner}, nil
 }
 
 // Close releases the catalog resources.
 func (c *Catalog) Close() {
 	ffiCatalogFree.symbol(c.ctx)(c.inner)
+	c.lib.release()
 }
 
 // GetTable retrieves a table from the catalog using the given identifier.
@@ -54,7 +57,8 @@ func (c *Catalog) GetTable(id *Identifier) (*Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Table{ctx: c.ctx, inner: inner}, nil
+	c.lib.acquire()
+	return &Table{ctx: c.ctx, lib: c.lib, inner: inner}, nil
 }
 
 var ffiCatalogNew = newFFI(ffiOpts{

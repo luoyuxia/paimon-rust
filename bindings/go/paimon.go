@@ -41,9 +41,14 @@ import (
 
 // Paimon is the entry point for all paimon operations.
 // Create one with Open() or OpenLibrary().
+//
+// Paimon must outlive all objects derived from it (Catalog, Table, etc.),
+// or those objects must be closed first. The underlying shared library is
+// reference-counted and will not be unloaded until all derived objects
+// are closed.
 type Paimon struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx context.Context
+	lib *libRef
 }
 
 // Open loads the embedded paimon-c shared library and returns a Paimon instance.
@@ -59,14 +64,15 @@ func Open() (*Paimon, error) {
 // OpenLibrary loads a paimon-c shared library from an explicit filesystem path.
 // Use this for development when working with a locally built library.
 func OpenLibrary(path string) (*Paimon, error) {
-	ctx, cancel, err := newContext(path)
+	ctx, lib, err := newContext(path)
 	if err != nil {
 		return nil, err
 	}
-	return &Paimon{ctx: ctx, cancel: cancel}, nil
+	return &Paimon{ctx: ctx, lib: lib}, nil
 }
 
-// Close releases the shared library resources.
+// Close releases this Paimon instance's reference to the shared library.
+// The library is unloaded once all derived objects are also closed.
 func (p *Paimon) Close() {
-	p.cancel()
+	p.lib.release()
 }
