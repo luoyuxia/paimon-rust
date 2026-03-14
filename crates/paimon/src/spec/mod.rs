@@ -47,6 +47,6 @@ mod manifest_entry;
 pub use manifest_entry::ManifestEntry;
 mod objects_file;
 pub use objects_file::from_avro_bytes;
-mod stats;
+pub(crate) mod stats;
 mod types;
 pub use types::*;
