@@ -51,7 +51,7 @@ func (ts *TableScan) Plan() (*Plan, error) {
 		return nil, err
 	}
 	ts.lib.acquire()
-	return &Plan{ctx: ts.ctx, lib: ts.lib, inner: inner}, nil
+	return &Plan{handle: newPlanHandle(ts.ctx, ts.lib, inner)}, nil
 }
 
 var ffiTableScanFree = newFFI(ffiOpts{

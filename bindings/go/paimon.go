@@ -23,8 +23,8 @@
 // The pre-built shared library is embedded in the package and automatically
 // loaded at runtime — no manual build step needed.
 //
-// Note: reading Arrow record batches (via RecordBatchReader.NextRecord)
-// requires CGO because it imports the arrow-go cdata package.
+// This package requires CGO because it imports the arrow-go cdata package
+// for Arrow C Data Interface support.
 //
 // Basic usage:
 //

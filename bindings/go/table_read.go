@@ -52,7 +52,7 @@ func (tr *TableRead) Close() {
 // the Arrow C Data Interface (zero-copy). Call NextRecord to advance and
 // Close when done.
 //
-//	reader, _ := read.ToRecordBatchReader(plan)
+//	reader, _ := read.ToRecordBatchReader(plan.Splits())
 //	defer reader.Close()
 //	for {
 //	    record, err := reader.NextRecord()
@@ -109,23 +109,25 @@ func (r *RecordBatchReader) Close() {
 	})
 }
 
-// ToRecordBatchReader creates a RecordBatchReader that lazily reads Arrow record batches
-// from the given splits via the Arrow C Data Interface (zero-copy).
+// ToRecordBatchReader creates a RecordBatchReader that lazily reads Arrow
+// record batches from the given splits via the Arrow C Data Interface
+// (zero-copy).
 //
-// All splits must originate from the same Plan and form a contiguous index
-// range (as returned by Plan.Splits or a contiguous sub-slice of it).
-// The parent Plan must remain open while the reader is in use.
+// The splits select a contiguous index range within a plan. Order of
+// elements in the slice does not matter; the range is determined by the
+// minimum and maximum indices. Duplicate or non-contiguous indices return
+// an error. All splits must originate from the same Plan.
 //
 // The caller must call Close on the returned reader when done.
 func (tr *TableRead) ToRecordBatchReader(splits []DataSplit) (*RecordBatchReader, error) {
 	if len(splits) == 0 {
 		return nil, errors.New("paimon: no splits provided")
 	}
-	plan := splits[0].plan
+	handle := splits[0].set.handle
 	minIdx := splits[0].index
 	maxIdx := splits[0].index
 	for _, s := range splits[1:] {
-		if s.plan != plan {
+		if s.set.handle != handle {
 			return nil, errors.New("paimon: all splits must be from the same plan")
 		}
 		if s.index < minIdx {
@@ -136,11 +138,11 @@ func (tr *TableRead) ToRecordBatchReader(splits []DataSplit) (*RecordBatchReader
 		}
 	}
 	if maxIdx-minIdx+1 != len(splits) {
-		return nil, errors.New("paimon: splits must be contiguous")
+		return nil, errors.New("paimon: splits must be contiguous (no gaps or duplicates)")
 	}
 	offset := uintptr(minIdx)
 	length := uintptr(len(splits))
-	reader, err := ffiTableReadToArrow.symbol(tr.ctx)(tr.inner, plan.inner, offset, length)
+	reader, err := ffiTableReadToArrow.symbol(tr.ctx)(tr.inner, handle.inner, offset, length)
 	if err != nil {
 		return nil, err
 	}
