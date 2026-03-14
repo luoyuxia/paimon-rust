@@ -46,7 +46,7 @@ func (r *libRef) acquire() { r.count.Add(1) }
 
 func (r *libRef) release() {
 	if r.count.Add(-1) == 0 {
-		_ = FreeLibrary(r.lib)
+		_ = freeLibrary(r.lib)
 	}
 }
 
@@ -96,7 +96,7 @@ func (f *FFI[T]) withFFI(ctx context.Context, lib uintptr) (context.Context, err
 	); status != ffi.OK {
 		return nil, errors.New(status.String())
 	}
-	fn, err := GetProcAddress(lib, f.opts.sym.String())
+	fn, err := getProcAddress(lib, f.opts.sym.String())
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (f *FFI[T]) withFFI(ctx context.Context, lib uintptr) (context.Context, err
 var withFFIs []contextWithFFI
 
 func newContext(path string) (ctx context.Context, lib *libRef, err error) {
-	handle, err := LoadLibrary(path)
+	handle, err := loadLibrary(path)
 	if err != nil {
 		return
 	}

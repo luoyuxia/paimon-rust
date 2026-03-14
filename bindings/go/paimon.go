@@ -28,14 +28,13 @@
 //
 // Basic usage:
 //
-//	p, err := paimon.Open()
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer p.Close()
+//	catalog, err := paimon.NewFileSystemCatalog("/path/to/warehouse")
+//	if err != nil { log.Fatal(err) }
+//	defer catalog.Close()
 //
-//	catalog, err := p.NewFileSystemCatalog("/path/to/warehouse")
-//	...
+//	table, err := catalog.GetTable(paimon.NewIdentifier("default", "my_table"))
+//	if err != nil { log.Fatal(err) }
+//	defer table.Close()
 package paimon
 
 import (
@@ -43,44 +42,20 @@ import (
 	"sync"
 )
 
-// Paimon is the entry point for all paimon operations.
-// Create one with Open() or OpenLibrary().
-//
-// Paimon must outlive all objects derived from it (Catalog, Table, etc.),
-// or those objects must be closed first. The underlying shared library is
-// reference-counted and will not be unloaded until all derived objects
-// are closed.
-type Paimon struct {
-	ctx       context.Context
-	lib       *libRef
-	closeOnce sync.Once
-}
+var (
+	globalOnce sync.Once
+	globalCtx  context.Context
+	globalLib  *libRef
+	globalErr  error
+)
 
-// Open loads the embedded paimon-c shared library and returns a Paimon instance.
-// The library is decompressed from the embedded binary on first call and
-// cached for subsequent calls.
-func Open() (*Paimon, error) {
-	if err := loadEmbeddedLib(); err != nil {
-		return nil, err
-	}
-	return OpenLibrary(libPath)
-}
-
-// OpenLibrary loads a paimon-c shared library from an explicit filesystem path.
-// Use this for development when working with a locally built library.
-func OpenLibrary(path string) (*Paimon, error) {
-	ctx, lib, err := newContext(path)
-	if err != nil {
-		return nil, err
-	}
-	return &Paimon{ctx: ctx, lib: lib}, nil
-}
-
-// Close releases this Paimon instance's reference to the shared library.
-// The library is unloaded once all derived objects are also closed.
-// Close is safe to call multiple times.
-func (p *Paimon) Close() {
-	p.closeOnce.Do(func() {
-		p.lib.release()
+func ensureLoaded() (context.Context, *libRef, error) {
+	globalOnce.Do(func() {
+		if err := loadEmbeddedLib(); err != nil {
+			globalErr = err
+			return
+		}
+		globalCtx, globalLib, globalErr = newContext(libPath)
 	})
+	return globalCtx, globalLib, globalErr
 }

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"io"
 	"runtime"
+	"sort"
 	"sync"
 	"unsafe"
 
@@ -32,7 +33,7 @@ import (
 	"github.com/jupiterrider/ffi"
 )
 
-// TableRead reads data from a table given a plan of splits.
+// TableRead reads data from splits produced by a TableScan.
 type TableRead struct {
 	ctx       context.Context
 	lib       *libRef
@@ -48,22 +49,66 @@ func (tr *TableRead) Close() {
 	})
 }
 
+// NewRecordBatchReader creates a RecordBatchReader that iterates over Arrow
+// record batches for the given data splits. The splits can be non-contiguous
+// and in any order. All splits must originate from the same Plan.
+func (tr *TableRead) NewRecordBatchReader(splits []DataSplit) (*RecordBatchReader, error) {
+	if len(splits) == 0 {
+		return nil, errors.New("paimon: splits must not be empty")
+	}
+
+	// All splits must share the same plan handle.
+	handle := splits[0].set.handle
+	indices := make([]int, len(splits))
+	for i, s := range splits {
+		if s.set.handle != handle {
+			return nil, errors.New("paimon: all splits must originate from the same Plan")
+		}
+		indices[i] = s.index
+	}
+	sort.Ints(indices)
+
+	// Group sorted indices into contiguous ranges.
+	type spanRange struct{ offset, length int }
+	ranges := []spanRange{{offset: indices[0], length: 1}}
+	for _, idx := range indices[1:] {
+		last := &ranges[len(ranges)-1]
+		if idx == last.offset+last.length {
+			last.length++
+		} else {
+			ranges = append(ranges, spanRange{offset: idx, length: 1})
+		}
+	}
+
+	// Create one C reader per contiguous range.
+	createFn := ffiTableReadToArrow.symbol(tr.ctx)
+	readers := make([]*paimonRecordBatchReader, 0, len(ranges))
+	for _, r := range ranges {
+		inner, err := createFn(tr.inner, handle.inner, uintptr(r.offset), uintptr(r.length))
+		if err != nil {
+			// Free already-created readers on error.
+			freeFn := ffiRecordBatchReaderFree.symbol(tr.ctx)
+			for _, rd := range readers {
+				freeFn(rd)
+				tr.lib.release()
+			}
+			return nil, err
+		}
+		tr.lib.acquire()
+		readers = append(readers, inner)
+	}
+
+	return &RecordBatchReader{ctx: tr.ctx, lib: tr.lib, readers: readers}, nil
+}
+
 // RecordBatchReader iterates over Arrow record batches one at a time via
 // the Arrow C Data Interface (zero-copy). Call NextRecord to advance and
 // Close when done.
-//
-//	reader, _ := read.ToRecordBatchReader(plan.Splits())
-//	defer reader.Close()
-//	for {
-//	    record, err := reader.NextRecord()
-//	    if err != nil { break } // io.EOF at end
-//	    // use record ...
-//	    record.Release()
-//	}
 type RecordBatchReader struct {
 	ctx       context.Context
 	lib       *libRef
-	inner     *paimonRecordBatchReader
+	readers   []*paimonRecordBatchReader
+	current   int
 	closeOnce sync.Once
 }
 
@@ -88,66 +133,33 @@ func (r *RecordBatchReader) NextRecord() (arrow.Record, error) {
 }
 
 func (r *RecordBatchReader) next() (*arrowBatch, error) {
-	array, schema, err := ffiRecordBatchReaderNext.symbol(r.ctx)(r.inner)
-	if err != nil {
-		return nil, err
+	nextFn := ffiRecordBatchReaderNext.symbol(r.ctx)
+	for r.current < len(r.readers) {
+		array, schema, err := nextFn(r.readers[r.current])
+		if err != nil {
+			return nil, err
+		}
+		if array == nil && schema == nil {
+			r.current++
+			continue
+		}
+		r.lib.acquire()
+		ab := &arrowBatch{ctx: r.ctx, lib: r.lib, array: array, schema: schema}
+		runtime.SetFinalizer(ab, (*arrowBatch).release)
+		return ab, nil
 	}
-	if array == nil && schema == nil {
-		return nil, io.EOF
-	}
-	r.lib.acquire()
-	ab := &arrowBatch{ctx: r.ctx, lib: r.lib, array: array, schema: schema}
-	runtime.SetFinalizer(ab, (*arrowBatch).release)
-	return ab, nil
+	return nil, io.EOF
 }
 
-// Close releases the underlying C record batch reader. Safe to call multiple times.
+// Close releases the underlying C record batch readers. Safe to call multiple times.
 func (r *RecordBatchReader) Close() {
 	r.closeOnce.Do(func() {
-		ffiRecordBatchReaderFree.symbol(r.ctx)(r.inner)
-		r.lib.release()
+		freeFn := ffiRecordBatchReaderFree.symbol(r.ctx)
+		for _, rd := range r.readers {
+			freeFn(rd)
+			r.lib.release()
+		}
 	})
-}
-
-// ToRecordBatchReader creates a RecordBatchReader that lazily reads Arrow
-// record batches from the given splits via the Arrow C Data Interface
-// (zero-copy).
-//
-// The splits select a contiguous index range within a plan. Order of
-// elements in the slice does not matter; the range is determined by the
-// minimum and maximum indices. Duplicate or non-contiguous indices return
-// an error. All splits must originate from the same Plan.
-//
-// The caller must call Close on the returned reader when done.
-func (tr *TableRead) ToRecordBatchReader(splits []DataSplit) (*RecordBatchReader, error) {
-	if len(splits) == 0 {
-		return nil, errors.New("paimon: no splits provided")
-	}
-	handle := splits[0].set.handle
-	minIdx := splits[0].index
-	maxIdx := splits[0].index
-	for _, s := range splits[1:] {
-		if s.set.handle != handle {
-			return nil, errors.New("paimon: all splits must be from the same plan")
-		}
-		if s.index < minIdx {
-			minIdx = s.index
-		}
-		if s.index > maxIdx {
-			maxIdx = s.index
-		}
-	}
-	if maxIdx-minIdx+1 != len(splits) {
-		return nil, errors.New("paimon: splits must be contiguous (no gaps or duplicates)")
-	}
-	offset := uintptr(minIdx)
-	length := uintptr(len(splits))
-	reader, err := ffiTableReadToArrow.symbol(tr.ctx)(tr.inner, handle.inner, offset, length)
-	if err != nil {
-		return nil, err
-	}
-	tr.lib.acquire()
-	return &RecordBatchReader{ctx: tr.ctx, lib: tr.lib, inner: reader}, nil
 }
 
 var ffiTableReadFree = newFFI(ffiOpts{

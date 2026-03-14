@@ -38,44 +38,32 @@ import (
 func TestReadLogTable(t *testing.T) {
 	warehouse := os.Getenv("PAIMON_TEST_WAREHOUSE")
 	if warehouse == "" {
-		warehouse = "/Users/yuxia/Projects/rust-projects/paimon-rust/dev/paimon-warehouse"
+		warehouse = "/tmp/paimon-warehouse"
 	}
 
 	if _, err := os.Stat(warehouse); os.IsNotExist(err) {
 		t.Skipf("Skipping: warehouse %s does not exist (run 'make docker-up' first)", warehouse)
 	}
 
-	p, err := paimon.Open()
-	if err != nil {
-		t.Fatalf("Failed to open paimon: %v", err)
-	}
-	defer p.Close()
-
-	catalog, err := p.NewFileSystemCatalog(warehouse)
+	catalog, err := paimon.NewFileSystemCatalog(warehouse)
 	if err != nil {
 		t.Fatalf("Failed to create catalog: %v", err)
 	}
 	defer catalog.Close()
 
-	identifier, err := p.NewIdentifier("default", "simple_log_table")
-	if err != nil {
-		t.Fatalf("Failed to create identifier: %v", err)
-	}
-	defer identifier.Close()
-
-	table, err := catalog.GetTable(identifier)
+	table, err := catalog.GetTable(paimon.NewIdentifier("default", "simple_log_table"))
 	if err != nil {
 		t.Fatalf("Failed to get table: %v", err)
 	}
 	defer table.Close()
 
-	readBuilder, err := table.NewReadBuilder()
+	rb, err := table.NewReadBuilder()
 	if err != nil {
 		t.Fatalf("Failed to create read builder: %v", err)
 	}
-	defer readBuilder.Close()
+	defer rb.Close()
 
-	scan, err := readBuilder.NewScan()
+	scan, err := rb.NewScan()
 	if err != nil {
 		t.Fatalf("Failed to create scan: %v", err)
 	}
@@ -87,15 +75,20 @@ func TestReadLogTable(t *testing.T) {
 	}
 	defer plan.Close()
 
-	read, err := readBuilder.NewRead()
+	splits := plan.Splits()
+	if len(splits) == 0 {
+		t.Fatal("Expected at least one split")
+	}
+
+	read, err := rb.NewRead()
 	if err != nil {
-		t.Fatalf("Failed to create read: %v", err)
+		t.Fatalf("Failed to create table read: %v", err)
 	}
 	defer read.Close()
 
-	reader, err := read.ToRecordBatchReader(plan.Splits())
+	reader, err := read.NewRecordBatchReader(splits)
 	if err != nil {
-		t.Fatalf("Failed to read arrow: %v", err)
+		t.Fatalf("Failed to create record batch reader: %v", err)
 	}
 	defer reader.Close()
 

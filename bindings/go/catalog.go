@@ -36,14 +36,18 @@ type Catalog struct {
 }
 
 // NewFileSystemCatalog creates a new FileSystemCatalog for the given warehouse path.
-func (p *Paimon) NewFileSystemCatalog(warehouse string) (*Catalog, error) {
-	createFn := ffiCatalogNew.symbol(p.ctx)
+func NewFileSystemCatalog(warehouse string) (*Catalog, error) {
+	ctx, lib, err := ensureLoaded()
+	if err != nil {
+		return nil, err
+	}
+	createFn := ffiCatalogNew.symbol(ctx)
 	inner, err := createFn(warehouse)
 	if err != nil {
 		return nil, err
 	}
-	p.lib.acquire()
-	return &Catalog{ctx: p.ctx, lib: p.lib, inner: inner}, nil
+	lib.acquire()
+	return &Catalog{ctx: ctx, lib: lib, inner: inner}, nil
 }
 
 // Close releases the catalog resources. Safe to call multiple times.
@@ -55,9 +59,16 @@ func (c *Catalog) Close() {
 }
 
 // GetTable retrieves a table from the catalog using the given identifier.
-func (c *Catalog) GetTable(id *Identifier) (*Table, error) {
+func (c *Catalog) GetTable(id Identifier) (*Table, error) {
+	createIdFn := ffiIdentifierNew.symbol(c.ctx)
+	cID, err := createIdFn(id.database, id.object)
+	if err != nil {
+		return nil, err
+	}
+	defer ffiIdentifierFree.symbol(c.ctx)(cID)
+
 	getFn := ffiCatalogGetTable.symbol(c.ctx)
-	inner, err := getFn(c.inner, id.inner)
+	inner, err := getFn(c.inner, cID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +82,7 @@ var ffiCatalogNew = newFFI(ffiOpts{
 	aTypes: []*ffi.Type{&ffi.TypePointer},
 }, func(ctx context.Context, ffiCall ffiCall) func(warehouse string) (*paimonCatalog, error) {
 	return func(warehouse string) (*paimonCatalog, error) {
-		byteWarehouse, err := BytePtrFromString(warehouse)
+		byteWarehouse, err := bytePtrFromString(warehouse)
 		if err != nil {
 			return nil, err
 		}
@@ -96,6 +107,46 @@ var ffiCatalogFree = newFFI(ffiOpts{
 		ffiCall(
 			nil,
 			unsafe.Pointer(&catalog),
+		)
+	}
+})
+
+var ffiIdentifierNew = newFFI(ffiOpts{
+	sym:    "paimon_identifier_new",
+	rType:  &typeResultIdentifierNew,
+	aTypes: []*ffi.Type{&ffi.TypePointer, &ffi.TypePointer},
+}, func(ctx context.Context, ffiCall ffiCall) func(database, object string) (*paimonIdentifier, error) {
+	return func(database, object string) (*paimonIdentifier, error) {
+		byteDB, err := bytePtrFromString(database)
+		if err != nil {
+			return nil, err
+		}
+		byteObj, err := bytePtrFromString(object)
+		if err != nil {
+			return nil, err
+		}
+		var result resultIdentifierNew
+		ffiCall(
+			unsafe.Pointer(&result),
+			unsafe.Pointer(&byteDB),
+			unsafe.Pointer(&byteObj),
+		)
+		if result.error != nil {
+			return nil, parseError(ctx, result.error)
+		}
+		return result.identifier, nil
+	}
+})
+
+var ffiIdentifierFree = newFFI(ffiOpts{
+	sym:    "paimon_identifier_free",
+	rType:  &ffi.TypeVoid,
+	aTypes: []*ffi.Type{&ffi.TypePointer},
+}, func(_ context.Context, ffiCall ffiCall) func(id *paimonIdentifier) {
+	return func(id *paimonIdentifier) {
+		ffiCall(
+			nil,
+			unsafe.Pointer(&id),
 		)
 	}
 })

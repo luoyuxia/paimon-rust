@@ -19,77 +19,13 @@
 
 package paimon
 
-import (
-	"context"
-	"sync"
-	"unsafe"
-
-	"github.com/jupiterrider/ffi"
-)
-
 // Identifier identifies a table by database and object name.
 type Identifier struct {
-	ctx       context.Context
-	lib       *libRef
-	inner     *paimonIdentifier
-	closeOnce sync.Once
+	database string
+	object   string
 }
 
 // NewIdentifier creates a new Identifier with the given database and object name.
-func (p *Paimon) NewIdentifier(database, object string) (*Identifier, error) {
-	createFn := ffiIdentifierNew.symbol(p.ctx)
-	inner, err := createFn(database, object)
-	if err != nil {
-		return nil, err
-	}
-	p.lib.acquire()
-	return &Identifier{ctx: p.ctx, lib: p.lib, inner: inner}, nil
+func NewIdentifier(database, object string) Identifier {
+	return Identifier{database: database, object: object}
 }
-
-// Close releases the identifier resources. Safe to call multiple times.
-func (id *Identifier) Close() {
-	id.closeOnce.Do(func() {
-		ffiIdentifierFree.symbol(id.ctx)(id.inner)
-		id.lib.release()
-	})
-}
-
-var ffiIdentifierNew = newFFI(ffiOpts{
-	sym:    "paimon_identifier_new",
-	rType:  &typeResultIdentifierNew,
-	aTypes: []*ffi.Type{&ffi.TypePointer, &ffi.TypePointer},
-}, func(ctx context.Context, ffiCall ffiCall) func(database, object string) (*paimonIdentifier, error) {
-	return func(database, object string) (*paimonIdentifier, error) {
-		byteDB, err := BytePtrFromString(database)
-		if err != nil {
-			return nil, err
-		}
-		byteObj, err := BytePtrFromString(object)
-		if err != nil {
-			return nil, err
-		}
-		var result resultIdentifierNew
-		ffiCall(
-			unsafe.Pointer(&result),
-			unsafe.Pointer(&byteDB),
-			unsafe.Pointer(&byteObj),
-		)
-		if result.error != nil {
-			return nil, parseError(ctx, result.error)
-		}
-		return result.identifier, nil
-	}
-})
-
-var ffiIdentifierFree = newFFI(ffiOpts{
-	sym:    "paimon_identifier_free",
-	rType:  &ffi.TypeVoid,
-	aTypes: []*ffi.Type{&ffi.TypePointer},
-}, func(_ context.Context, ffiCall ffiCall) func(id *paimonIdentifier) {
-	return func(id *paimonIdentifier) {
-		ffiCall(
-			nil,
-			unsafe.Pointer(&id),
-		)
-	}
-})

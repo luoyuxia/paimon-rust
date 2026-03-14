@@ -26,25 +26,25 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func BytePtrFromString(s string) (*byte, error) {
+func bytePtrFromString(s string) (*byte, error) {
 	if s == "" {
 		return new(byte), nil
 	}
 	return unix.BytePtrFromString(s)
 }
 
-func LoadLibrary(path string) (uintptr, error) {
+func loadLibrary(path string) (uintptr, error) {
 	return purego.Dlopen(path, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
 }
 
-func FreeLibrary(handle uintptr) error {
+func freeLibrary(handle uintptr) error {
 	if handle == 0 {
 		return nil
 	}
 	return purego.Dlclose(handle)
 }
 
-func GetProcAddress(handle uintptr, name string) (uintptr, error) {
+func getProcAddress(handle uintptr, name string) (uintptr, error) {
 	if handle == 0 {
 		return 0, nil
 	}

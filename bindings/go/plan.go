@@ -29,6 +29,38 @@ import (
 	"github.com/jupiterrider/ffi"
 )
 
+// Plan holds the result of a table scan, containing data splits to read.
+type Plan struct {
+	handle    *planHandle
+	closeOnce sync.Once
+}
+
+// Close releases the plan resources. Safe to call multiple times.
+// DataSplits obtained from Splits() remain valid after Close.
+func (p *Plan) Close() {
+	p.closeOnce.Do(func() {
+		p.handle.release()
+	})
+}
+
+// NumSplits returns the number of data splits in this plan.
+func (p *Plan) NumSplits() int {
+	return ffiPlanNumSplits.symbol(p.handle.ctx)(p.handle.inner)
+}
+
+// Splits returns all data splits in this plan. The returned DataSplits
+// keep the underlying plan data alive via GC-attached reference counting,
+// so they remain valid even after Plan.Close() is called.
+func (p *Plan) Splits() []DataSplit {
+	n := p.NumSplits()
+	set := newSplitSet(p.handle)
+	splits := make([]DataSplit, n)
+	for i := 0; i < n; i++ {
+		splits[i] = DataSplit{set: set, index: i}
+	}
+	return splits
+}
+
 // planHandle wraps the C plan pointer with reference counting.
 // The C plan is freed when the last reference is released.
 type planHandle struct {
@@ -40,7 +72,7 @@ type planHandle struct {
 
 func newPlanHandle(ctx context.Context, lib *libRef, inner *paimonPlan) *planHandle {
 	h := &planHandle{ctx: ctx, lib: lib, inner: inner}
-	h.refs.Store(1) // initial ref for Plan
+	h.refs.Store(1) // initial ref for the creator
 	return h
 }
 
@@ -72,42 +104,12 @@ func (s *splitSet) release() {
 	s.handle.release()
 }
 
-// Plan holds the scan result containing data splits to read.
-type Plan struct {
-	handle    *planHandle
-	closeOnce sync.Once
-}
-
-// Close releases the plan resources. Safe to call multiple times.
-// DataSplits obtained from Splits() remain valid after Close.
-func (p *Plan) Close() {
-	p.closeOnce.Do(func() {
-		p.handle.release()
-	})
-}
-
-// DataSplit identifies a single data split within a Plan.
-// DataSplits keep the underlying plan data alive even after Plan.Close()
-// is called, so they are safe to use independently.
+// DataSplit identifies a single data split within a plan.
+// DataSplits keep the underlying plan data alive via GC-attached
+// reference counting, so they are safe to use independently.
 type DataSplit struct {
 	set   *splitSet
 	index int
-}
-
-// NumSplits returns the number of data splits in the plan.
-func (p *Plan) NumSplits() int {
-	return ffiPlanNumSplits.symbol(p.handle.ctx)(p.handle.inner)
-}
-
-// Splits returns all data splits in the plan.
-func (p *Plan) Splits() []DataSplit {
-	n := p.NumSplits()
-	set := newSplitSet(p.handle)
-	splits := make([]DataSplit, n)
-	for i := range splits {
-		splits[i] = DataSplit{set: set, index: i}
-	}
-	return splits
 }
 
 var ffiPlanFree = newFFI(ffiOpts{
