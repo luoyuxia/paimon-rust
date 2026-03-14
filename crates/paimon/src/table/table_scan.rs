@@ -127,9 +127,15 @@ impl<'a> TableScan<'a> {
             Some(s) => s,
             None => return Ok(Plan::new(Vec::new())),
         };
-        let (target_split_size, open_file_cost) =
-            read_split_config(self.table.schema().options());
-        Self::plan_snapshot(snapshot, file_io, table_path, target_split_size, open_file_cost).await
+        let (target_split_size, open_file_cost) = read_split_config(self.table.schema().options());
+        Self::plan_snapshot(
+            snapshot,
+            file_io,
+            table_path,
+            target_split_size,
+            open_file_cost,
+        )
+        .await
     }
 
     pub async fn plan_snapshot(

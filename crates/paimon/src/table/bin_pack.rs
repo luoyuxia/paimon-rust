@@ -174,7 +174,10 @@ mod tests {
             .iter()
             .map(|g| g.iter().map(|f| f.file_name.as_str()).collect())
             .collect();
-        assert_eq!(names, vec![vec!["1", "2"], vec!["3"], vec!["4", "5"], vec!["6"]]);
+        assert_eq!(
+            names,
+            vec![vec!["1", "2"], vec!["3"], vec!["4", "5"], vec!["6"]]
+        );
     }
 
     /// Matches Java SplitGeneratorTest with targetSplitSize=40, openFileCost=20.
@@ -194,7 +197,10 @@ mod tests {
             .iter()
             .map(|g| g.iter().map(|f| f.file_name.as_str()).collect())
             .collect();
-        assert_eq!(names, vec![vec!["1", "2"], vec!["3"], vec!["4"], vec!["5"], vec!["6"]]);
+        assert_eq!(
+            names,
+            vec![vec!["1", "2"], vec!["3"], vec!["4"], vec!["5"], vec!["6"]]
+        );
     }
 
     /// Verify files are sorted by min_sequence_number before packing.
@@ -242,14 +248,8 @@ mod tests {
     #[test]
     fn test_read_split_config_custom() {
         let mut options = HashMap::new();
-        options.insert(
-            SOURCE_SPLIT_TARGET_SIZE.to_string(),
-            "256 mb".to_string(),
-        );
-        options.insert(
-            SOURCE_SPLIT_OPEN_FILE_COST.to_string(),
-            "8 mb".to_string(),
-        );
+        options.insert(SOURCE_SPLIT_TARGET_SIZE.to_string(), "256 mb".to_string());
+        options.insert(SOURCE_SPLIT_OPEN_FILE_COST.to_string(), "8 mb".to_string());
         let (target, open_cost) = read_split_config(&options);
         assert_eq!(target, 256 * 1024 * 1024);
         assert_eq!(open_cost, 8 * 1024 * 1024);
