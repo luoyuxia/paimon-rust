@@ -17,6 +17,7 @@
 
 //! Table API for Apache Paimon
 
+pub(crate) mod bin_pack;
 mod read_builder;
 mod snapshot_manager;
 mod source;

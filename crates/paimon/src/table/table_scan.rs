@@ -23,6 +23,7 @@
 use super::Table;
 use crate::io::FileIO;
 use crate::spec::{BinaryRow, FileKind, ManifestEntry, Snapshot};
+use crate::table::bin_pack::{read_split_config, split_for_batch};
 use crate::table::source::{DataSplitBuilder, Plan};
 use crate::table::SnapshotManager;
 use crate::Error;
@@ -116,7 +117,7 @@ impl<'a> TableScan<'a> {
         Self { table }
     }
 
-    /// Plan the full scan: read latest snapshot, manifest list, manifest entries, then build one DataSplit per (partition, bucket).
+    /// Plan the full scan: read latest snapshot, manifest list, manifest entries, then build DataSplits using bin packing.
     pub async fn plan(&self) -> crate::Result<Plan> {
         let file_io = self.table.file_io();
         let table_path = self.table.location();
@@ -126,13 +127,17 @@ impl<'a> TableScan<'a> {
             Some(s) => s,
             None => return Ok(Plan::new(Vec::new())),
         };
-        Self::plan_snapshot(snapshot, file_io, table_path).await
+        let (target_split_size, open_file_cost) =
+            read_split_config(self.table.schema().options());
+        Self::plan_snapshot(snapshot, file_io, table_path, target_split_size, open_file_cost).await
     }
 
     pub async fn plan_snapshot(
         snapshot: Snapshot,
         file_io: &FileIO,
         table_path: &str,
+        target_split_size: i64,
+        open_file_cost: i64,
     ) -> crate::Result<Plan> {
         let entries = read_all_manifest_entries(file_io, table_path, &snapshot).await?;
         let entries = merge_manifest_entries(entries);
@@ -159,28 +164,29 @@ impl<'a> TableScan<'a> {
                     message: format!("Manifest entry group for bucket {bucket} is empty, cannot determine total_buckets"),
                     source: None,
                 })?;
-            let mut data_files = Vec::new();
-
-            // currently, only group by splits by bucket
-            // todo: consider use binpack to generate split
-            for manifest_entry in group_entries {
-                let ManifestEntry { file, .. } = manifest_entry;
-                data_files.push(file);
-            }
+            let data_files: Vec<_> = group_entries
+                .into_iter()
+                .map(|e| {
+                    let ManifestEntry { file, .. } = e;
+                    file
+                })
+                .collect();
 
             // todo: consider partitioned table
             let bucket_path = format!("{base_path}/bucket-{bucket}");
-            let partition = BinaryRow::new(0);
 
-            let split = DataSplitBuilder::new()
-                .with_snapshot(snapshot_id)
-                .with_partition(partition)
-                .with_bucket(bucket)
-                .with_bucket_path(bucket_path)
-                .with_total_buckets(total_buckets)
-                .with_data_files(data_files)
-                .build()?;
-            splits.push(split);
+            let file_groups = split_for_batch(data_files, target_split_size, open_file_cost);
+            for file_group in file_groups {
+                let split = DataSplitBuilder::new()
+                    .with_snapshot(snapshot_id)
+                    .with_partition(BinaryRow::new(0))
+                    .with_bucket(bucket)
+                    .with_bucket_path(bucket_path.clone())
+                    .with_total_buckets(total_buckets)
+                    .with_data_files(file_group)
+                    .build()?;
+                splits.push(split);
+            }
         }
         Ok(Plan::new(splits))
     }
