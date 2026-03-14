@@ -1,0 +1,100 @@
+name: Go Binding Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: so
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: so
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-13
+            goos: darwin
+            goarch: amd64
+            ext: dylib
+          - target: aarch64-apple-darwin
+            os: macos-14
+            goos: darwin
+            goarch: arm64
+            ext: dylib
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (aarch64-linux)
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Build paimon-c
+        run: cargo build -p paimon-c --target ${{ matrix.target }} --release
+
+      - name: Compress with zstd
+        run: |
+          zstd -19 -f target/${{ matrix.target }}/release/libpaimon_c.${{ matrix.ext }} \
+            -o libpaimon_c.${{ matrix.goos }}.${{ matrix.goarch }}.${{ matrix.ext }}.zst
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          path: libpaimon_c.*.zst
+          overwrite: true
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: bindings/go
+          merge-multiple: true
+
+      - name: Commit native libraries
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bindings/go/libpaimon_c.*.zst
+          git commit -m "chore(go): update native libraries for ${VERSION}"
+          git push origin main
+
+      - name: Create tag
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          git tag "bindings/go/${VERSION}"
+          git push origin "bindings/go/${VERSION}"
