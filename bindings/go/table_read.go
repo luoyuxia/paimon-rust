@@ -45,6 +45,7 @@ type TableRead struct {
 func (tr *TableRead) Close() {
 	tr.closeOnce.Do(func() {
 		ffiTableReadFree.symbol(tr.ctx)(tr.inner)
+		tr.inner = nil
 		tr.lib.release()
 	})
 }
@@ -53,6 +54,9 @@ func (tr *TableRead) Close() {
 // record batches for the given data splits. The splits can be non-contiguous
 // and in any order. All splits must originate from the same Plan.
 func (tr *TableRead) NewRecordBatchReader(splits []DataSplit) (*RecordBatchReader, error) {
+	if tr.inner == nil {
+		return nil, ErrClosed
+	}
 	if len(splits) == 0 {
 		return nil, errors.New("paimon: splits must not be empty")
 	}
@@ -117,6 +121,9 @@ type RecordBatchReader struct {
 // and released automatically — the caller only needs to call Release on the
 // returned arrow.Record when done.
 func (r *RecordBatchReader) NextRecord() (arrow.Record, error) {
+	if r.readers == nil {
+		return nil, ErrClosed
+	}
 	batch, err := r.next()
 	if err != nil {
 		return nil, err
@@ -159,6 +166,7 @@ func (r *RecordBatchReader) Close() {
 			freeFn(rd)
 			r.lib.release()
 		}
+		r.readers = nil
 	})
 }
 

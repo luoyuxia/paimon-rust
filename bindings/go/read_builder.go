@@ -39,12 +39,16 @@ type ReadBuilder struct {
 func (rb *ReadBuilder) Close() {
 	rb.closeOnce.Do(func() {
 		ffiReadBuilderFree.symbol(rb.ctx)(rb.inner)
+		rb.inner = nil
 		rb.lib.release()
 	})
 }
 
 // NewScan creates a TableScan for planning which data files to read.
 func (rb *ReadBuilder) NewScan() (*TableScan, error) {
+	if rb.inner == nil {
+		return nil, ErrClosed
+	}
 	createFn := ffiReadBuilderNewScan.symbol(rb.ctx)
 	inner, err := createFn(rb.inner)
 	if err != nil {
@@ -56,6 +60,9 @@ func (rb *ReadBuilder) NewScan() (*TableScan, error) {
 
 // NewRead creates a TableRead for reading data from splits.
 func (rb *ReadBuilder) NewRead() (*TableRead, error) {
+	if rb.inner == nil {
+		return nil, ErrClosed
+	}
 	createFn := ffiReadBuilderNewRead.symbol(rb.ctx)
 	inner, err := createFn(rb.inner)
 	if err != nil {

@@ -34,7 +34,7 @@ func bytePtrFromString(s string) (*byte, error) {
 }
 
 func loadLibrary(path string) (uintptr, error) {
-	return purego.Dlopen(path, purego.RTLD_LAZY|purego.RTLD_GLOBAL)
+	return purego.Dlopen(path, purego.RTLD_LAZY|purego.RTLD_LOCAL)
 }
 
 func freeLibrary(handle uintptr) error {

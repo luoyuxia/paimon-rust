@@ -22,6 +22,7 @@ package paimon
 import (
 	"context"
 	"errors"
+	"os"
 	"sync/atomic"
 	"unsafe"
 
@@ -117,8 +118,14 @@ func newContext(path string) (ctx context.Context, lib *libRef, err error) {
 	for _, withFFI := range withFFIs {
 		ctx, err = withFFI(ctx, handle)
 		if err != nil {
+			_ = freeLibrary(handle)
 			return
 		}
+	}
+	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		_ = freeLibrary(handle)
+		err = removeErr
+		return
 	}
 	lib = newLibRef(handle)
 	return

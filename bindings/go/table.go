@@ -39,12 +39,16 @@ type Table struct {
 func (t *Table) Close() {
 	t.closeOnce.Do(func() {
 		ffiTableFree.symbol(t.ctx)(t.inner)
+		t.inner = nil
 		t.lib.release()
 	})
 }
 
 // NewReadBuilder creates a ReadBuilder for this table.
 func (t *Table) NewReadBuilder() (*ReadBuilder, error) {
+	if t.inner == nil {
+		return nil, ErrClosed
+	}
 	createFn := ffiTableNewReadBuilder.symbol(t.ctx)
 	inner, err := createFn(t.inner)
 	if err != nil {

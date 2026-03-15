@@ -21,11 +21,15 @@ package paimon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"unsafe"
 
 	"github.com/jupiterrider/ffi"
 )
+
+// ErrClosed is returned when an operation is attempted on a closed resource.
+var ErrClosed = errors.New("paimon: use of closed resource")
 
 // ErrorCode represents categories of errors from paimon.
 type ErrorCode int32

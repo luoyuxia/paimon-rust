@@ -29,26 +29,6 @@ import (
 
 // FFI type definitions mirroring C repr structs from paimon-c.
 var (
-	// paimon_bytes { data: *mut u8, len: usize }
-	typeBytes = ffi.Type{
-		Type: ffi.Struct,
-		Elements: &[]*ffi.Type{
-			&ffi.TypePointer,
-			&ffi.TypePointer,
-			nil,
-		}[0],
-	}
-
-	// paimon_error { code: i32, message: paimon_bytes }
-	typeError = ffi.Type{
-		Type: ffi.Struct,
-		Elements: &[]*ffi.Type{
-			&ffi.TypeSint32,
-			&typeBytes,
-			nil,
-		}[0],
-	}
-
 	// Result types: { value, *error }
 	// paimon_result_catalog_new { catalog: paimon_catalog, error: *paimon_error }
 	typeResultCatalogNew = ffi.Type{

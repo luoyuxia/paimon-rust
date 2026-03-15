@@ -54,12 +54,16 @@ func NewFileSystemCatalog(warehouse string) (*Catalog, error) {
 func (c *Catalog) Close() {
 	c.closeOnce.Do(func() {
 		ffiCatalogFree.symbol(c.ctx)(c.inner)
+		c.inner = nil
 		c.lib.release()
 	})
 }
 
 // GetTable retrieves a table from the catalog using the given identifier.
 func (c *Catalog) GetTable(id Identifier) (*Table, error) {
+	if c.inner == nil {
+		return nil, ErrClosed
+	}
 	createIdFn := ffiIdentifierNew.symbol(c.ctx)
 	cID, err := createIdFn(id.database, id.object)
 	if err != nil {

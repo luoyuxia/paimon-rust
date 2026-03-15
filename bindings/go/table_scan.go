@@ -39,12 +39,16 @@ type TableScan struct {
 func (ts *TableScan) Close() {
 	ts.closeOnce.Do(func() {
 		ffiTableScanFree.symbol(ts.ctx)(ts.inner)
+		ts.inner = nil
 		ts.lib.release()
 	})
 }
 
 // Plan executes the scan and returns a Plan containing data splits to read.
 func (ts *TableScan) Plan() (*Plan, error) {
+	if ts.inner == nil {
+		return nil, ErrClosed
+	}
 	planFn := ffiTableScanPlan.symbol(ts.ctx)
 	inner, err := planFn(ts.inner)
 	if err != nil {

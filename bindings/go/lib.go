@@ -62,16 +62,21 @@ func decompressLib(raw []byte) ([]byte, error) {
 	return io.ReadAll(decoder)
 }
 
-func writeTempExec(pattern string, binary []byte) (string, error) {
+func writeTempExec(pattern string, binary []byte) (path string, err error) {
 	f, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+	defer func() {
+		if err != nil {
+			os.Remove(f.Name())
+		}
+	}()
 	if _, err = f.Write(binary); err != nil {
 		return "", err
 	}
-	if err = f.Chmod(os.ModePerm); err != nil {
+	if err = f.Chmod(0o700); err != nil {
 		return "", err
 	}
 	return f.Name(), nil

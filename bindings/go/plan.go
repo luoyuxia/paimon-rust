@@ -40,11 +40,15 @@ type Plan struct {
 func (p *Plan) Close() {
 	p.closeOnce.Do(func() {
 		p.handle.release()
+		p.handle = nil
 	})
 }
 
 // NumSplits returns the number of data splits in this plan.
 func (p *Plan) NumSplits() int {
+	if p.handle == nil {
+		panic("paimon: NumSplits called on closed Plan")
+	}
 	return ffiPlanNumSplits.symbol(p.handle.ctx)(p.handle.inner)
 }
 
@@ -52,6 +56,9 @@ func (p *Plan) NumSplits() int {
 // keep the underlying plan data alive via GC-attached reference counting,
 // so they remain valid even after Plan.Close() is called.
 func (p *Plan) Splits() []DataSplit {
+	if p.handle == nil {
+		panic("paimon: Splits called on closed Plan")
+	}
 	n := p.NumSplits()
 	set := newSplitSet(p.handle)
 	splits := make([]DataSplit, n)
