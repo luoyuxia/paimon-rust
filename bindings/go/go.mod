@@ -1,4 +1,4 @@
-module github.com/apache/paimon-rust/bindings/go
+module github.com/luoyuxia/paimon-rust/bindings/go
 
 go 1.22.4
 
