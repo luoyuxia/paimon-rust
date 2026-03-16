@@ -99,7 +99,6 @@ submodule tag to contain the embedded artifacts required by Go module consumers.
 - Confirm the release contains all four compressed shared-library assets.
 - Confirm the tag resolves to a commit that contains:
   - `bindings/go/go.mod`
-  - `bindings/go/README.md`
   - `bindings/go/RELEASE.md`
   - the four `libpaimon_c.*.zst` files
 - Record which Rust release tag or baseline commit this Go binding release was

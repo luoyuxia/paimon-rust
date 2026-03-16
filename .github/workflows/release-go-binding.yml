@@ -92,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ needs.validate.outputs.source_sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ needs.validate.outputs.source_sha }}
 
       - name: Download packaged libraries
         uses: actions/download-artifact@v4
