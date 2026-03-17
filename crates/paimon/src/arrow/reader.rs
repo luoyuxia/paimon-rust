@@ -168,7 +168,7 @@ impl ArrowReader {
 
 /// Builds a Parquet [RowSelection] from deletion vector.
 /// Only rows not in the deletion vector are selected; deleted rows are skipped at read time.
-/// Uses [DeletionVectorIterator] with [advance_to](DeletionVectorIterator::advance_to) when skipping row groups.
+/// todo: Uses [DeletionVectorIterator] with [advance_to](DeletionVectorIterator::advance_to) when skipping row groups similar to iceberg-rust
 fn build_deletes_row_selection(
     row_group_metadata_list: &[RowGroupMetaData],
     deletion_vector: &DeletionVector,
