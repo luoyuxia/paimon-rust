@@ -23,6 +23,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef as ArrowSchemaRef;
 use datafusion::catalog::Session;
+use datafusion::common::DataFusionError;
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::error::Result as DFResult;
 use datafusion::logical_expr::Expr;
@@ -34,7 +35,8 @@ use crate::schema::paimon_schema_to_arrow;
 
 /// Read-only table provider for a Paimon table.
 ///
-/// Supports full table scan only (no write, no column projection, no predicate pushdown).
+/// Supports full table scan only (no write, no subset/reordered projection, no predicate
+/// pushdown).
 #[derive(Debug, Clone)]
 pub struct PaimonTableProvider {
     table: Table,
@@ -73,10 +75,21 @@ impl TableProvider for PaimonTableProvider {
     async fn scan(
         &self,
         _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
+        projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
+        if let Some(projection) = projection {
+            let is_full_schema_projection = projection.len() == self.schema.fields().len()
+                && projection.iter().copied().eq(0..self.schema.fields().len());
+
+            if !is_full_schema_projection {
+                return Err(DataFusionError::NotImplemented(
+                    "Paimon DataFusion integration does not yet support subset or reordered projections; use SELECT * until apache/paimon-rust#146 is implemented".to_string(),
+                ));
+            }
+        }
+
         Ok(Arc::new(PaimonTableScan::new(
             self.schema.clone(),
             self.table.clone(),

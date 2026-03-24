@@ -27,7 +27,7 @@ fn get_test_warehouse() -> String {
     std::env::var("PAIMON_TEST_WAREHOUSE").unwrap_or_else(|_| "/tmp/paimon-warehouse".to_string())
 }
 
-async fn read_rows(table_name: &str) -> Vec<(i32, String)> {
+async fn create_context(table_name: &str) -> SessionContext {
     let warehouse = get_test_warehouse();
     let catalog = FileSystemCatalog::new(warehouse).expect("Failed to create catalog");
     let identifier = Identifier::new("default", table_name);
@@ -41,11 +41,11 @@ async fn read_rows(table_name: &str) -> Vec<(i32, String)> {
     ctx.register_table(table_name, Arc::new(provider))
         .expect("Failed to register table");
 
-    let batches = ctx
-        .sql(&format!("SELECT id, name FROM {table_name}"))
-        .await
-        .expect("Failed to build query")
-        .collect()
+    ctx
+}
+
+async fn read_rows(table_name: &str) -> Vec<(i32, String)> {
+    let batches = collect_query(table_name, &format!("SELECT id, name FROM {table_name}"))
         .await
         .expect("Failed to collect query result");
 
@@ -75,6 +75,15 @@ async fn read_rows(table_name: &str) -> Vec<(i32, String)> {
 
     actual_rows.sort_by_key(|(id, _)| *id);
     actual_rows
+}
+
+async fn collect_query(
+    table_name: &str,
+    sql: &str,
+) -> datafusion::error::Result<Vec<datafusion::arrow::record_batch::RecordBatch>> {
+    let ctx = create_context(table_name).await;
+
+    ctx.sql(sql).await?.collect().await
 }
 
 #[tokio::test]
@@ -107,5 +116,19 @@ async fn test_read_primary_key_table_via_datafusion() {
     assert_eq!(
         actual_rows, expected_rows,
         "Primary key table rows should match expected values"
+    );
+}
+
+#[tokio::test]
+async fn test_subset_projection_returns_not_implemented() {
+    let error = collect_query("simple_log_table", "SELECT id FROM simple_log_table")
+        .await
+        .expect_err("Subset projection should be rejected until projection support lands");
+
+    assert!(
+        error
+            .to_string()
+            .contains("does not yet support subset or reordered projections"),
+        "Expected explicit unsupported projection error, got: {error}"
     );
 }

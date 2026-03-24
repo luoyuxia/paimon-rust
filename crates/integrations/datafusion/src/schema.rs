@@ -53,8 +53,10 @@ fn paimon_data_type_to_arrow(dt: &PaimonDataType) -> DFResult<DataType> {
         PaimonDataType::Binary(_) | PaimonDataType::VarBinary(_) => DataType::Binary,
         PaimonDataType::Date(_) => DataType::Date32,
         PaimonDataType::Time(t) => match t.precision() {
-            0 => DataType::Time32(TimeUnit::Second),
-            1..=3 => DataType::Time32(TimeUnit::Millisecond),
+            // `read.to_arrow(...)` goes through the Parquet Arrow reader, which exposes INT32
+            // TIME values as millisecond precision only. Mirror that here so provider schema and
+            // runtime RecordBatch schema stay identical.
+            0..=3 => DataType::Time32(TimeUnit::Millisecond),
             4..=6 => DataType::Time64(TimeUnit::Microsecond),
             7..=9 => DataType::Time64(TimeUnit::Nanosecond),
             precision => {
@@ -77,9 +79,10 @@ fn paimon_data_type_to_arrow(dt: &PaimonDataType) -> DFResult<DataType> {
                 DataFusionError::Internal("Decimal scale out of i8 range".to_string())
             })?;
             match d.precision() {
-                1..=9 => DataType::Decimal32(p, s),
-                10..=18 => DataType::Decimal64(p, s),
-                19..=38 => DataType::Decimal128(p, s),
+                // The Parquet Arrow reader normalizes DECIMAL columns to Decimal128 regardless of
+                // Parquet physical storage width. Mirror that here to avoid DataFusion schema
+                // mismatch between `TableProvider::schema()` and `execute()` output.
+                1..=38 => DataType::Decimal128(p, s),
                 precision => {
                     return Err(DataFusionError::Internal(format!(
                         "Unsupported DECIMAL precision {precision}"
