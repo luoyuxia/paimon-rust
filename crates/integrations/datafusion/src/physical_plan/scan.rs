@@ -41,6 +41,10 @@ impl PaimonTableScan {
     pub(crate) fn new(schema: ArrowSchemaRef, table: Table) -> Self {
         let plan_properties = PlanProperties::new(
             EquivalenceProperties::new(schema.clone()),
+            // TODO: Currently all Paimon splits are read in a single DataFusion partition,
+            // which means we lose DataFusion parallelism. A follow-up should expose one
+            // execution partition per Paimon split so that DataFusion can schedule them
+            // across threads.
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
