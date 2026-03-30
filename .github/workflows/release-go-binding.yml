@@ -18,6 +18,9 @@
 name: Release Go Binding
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
@@ -36,20 +39,33 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     outputs:
+      version: ${{ steps.meta.outputs.version }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
       tag: ${{ steps.meta.outputs.tag }}
       source_sha: ${{ steps.meta.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Validate release version and tag
         id: meta
         shell: bash
         run: |
-          version='${{ inputs.version }}'
-          source_ref='${{ inputs.source_ref }}'
+          event_name='${{ github.event_name }}'
+          version=''
+          source_ref=''
+
+          if [[ "$event_name" == "workflow_dispatch" ]]; then
+            version='${{ inputs.version }}'
+            source_ref='${{ inputs.source_ref }}'
+          else
+            tag_name='${{ github.ref_name }}'
+            source_ref='${{ github.sha }}'
+            version="$tag_name"
+          fi
+
           if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
             echo "invalid version: $version; expected vX.Y.Z or vX.Y.Z-rc.N" >&2
             exit 1
@@ -71,6 +87,8 @@ jobs:
           fi
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "source_sha=$(git rev-parse "$source_ref^{commit}")" >> "$GITHUB_OUTPUT"
 
   build:
@@ -158,8 +176,8 @@ jobs:
       - name: Create release tag commit
         env:
           TAG: ${{ needs.validate.outputs.tag }}
-          VERSION: ${{ inputs.version }}
-          SOURCE_REF: ${{ inputs.source_ref }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
           SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
         shell: bash
         run: |
