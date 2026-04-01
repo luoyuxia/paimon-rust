@@ -286,6 +286,20 @@ async fn test_mixed_and_filter_keeps_residual_datafusion_filter() {
     assert_eq!(actual_rows, vec![(2, "bob".to_string())]);
 }
 
+/// Test limit pushdown: ensures that LIMIT queries return the correct number of rows.
+#[tokio::test]
+async fn test_limit_pushdown() {
+    let batches = collect_query(
+        "simple_log_table",
+        "SELECT id, name FROM simple_log_table LIMIT 2",
+    )
+    .await
+    .expect("Limit query should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "LIMIT 2 should return exactly 2 rows");
+}
+
 // ======================= Catalog Provider Tests =======================
 #[tokio::test]
 async fn test_query_via_catalog_provider() {

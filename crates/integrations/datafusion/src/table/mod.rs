@@ -100,7 +100,7 @@ impl TableProvider for PaimonTableProvider {
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
         // Convert projection indices to column names and compute projected schema
         let (projected_schema, projected_columns) = if let Some(indices) = projection {
@@ -119,6 +119,8 @@ impl TableProvider for PaimonTableProvider {
         if let Some(filter) = build_pushed_predicate(filters, self.table.schema().fields()) {
             read_builder.with_filter(filter);
         }
+        let read_builder = self.table.new_read_builder();
+        // todo: publish limit to paimon-core to plan
         let scan = read_builder.new_scan();
         let plan = scan.plan().await.map_err(to_datafusion_error)?;
 
@@ -143,6 +145,7 @@ impl TableProvider for PaimonTableProvider {
             self.table.clone(),
             projected_columns,
             planned_partitions,
+            limit,
         )))
     }
 }
