@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Int32Array, StringArray};
+use datafusion::catalog::CatalogProvider;
 use datafusion::prelude::SessionContext;
 use paimon::catalog::Identifier;
 use paimon::{Catalog, CatalogOptions, FileSystemCatalog, Options};
@@ -231,4 +232,15 @@ async fn test_query_via_catalog_provider() {
     let batches = df.collect().await.expect("Failed to collect results");
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 3, "Expected 3 rows from simple_log_table");
+}
+
+#[tokio::test]
+async fn test_missing_database_returns_no_schema() {
+    let catalog = create_catalog();
+    let provider = PaimonCatalogProvider::new(Arc::new(catalog));
+
+    assert!(
+        provider.schema("definitely_missing_database").is_none(),
+        "missing databases should not resolve to a schema provider"
+    );
 }

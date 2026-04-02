@@ -67,10 +67,16 @@ impl CatalogProvider for PaimonCatalogProvider {
     }
 
     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-        Some(Arc::new(PaimonSchemaProvider::new(
-            self.catalog.clone(),
-            name.to_string(),
-        )))
+        futures::executor::block_on(async {
+            match self.catalog.get_database(name).await {
+                Ok(_) => Some(Arc::new(PaimonSchemaProvider::new(
+                    self.catalog.clone(),
+                    name.to_string(),
+                )) as Arc<dyn SchemaProvider>),
+                Err(paimon::Error::DatabaseNotExist { .. }) => None,
+                Err(_) => None,
+            }
+        })
     }
 }
 
