@@ -289,15 +289,49 @@ async fn test_mixed_and_filter_keeps_residual_datafusion_filter() {
 /// Test limit pushdown: ensures that LIMIT queries return the correct number of rows.
 #[tokio::test]
 async fn test_limit_pushdown() {
-    let batches = collect_query(
-        "simple_log_table",
-        "SELECT id, name FROM simple_log_table LIMIT 2",
-    )
-    .await
-    .expect("Limit query should succeed");
+    // Test append-only table (simple_log_table)
+    {
+        let batches = collect_query(
+            "simple_log_table",
+            "SELECT id, name FROM simple_log_table LIMIT 2",
+        )
+        .await
+        .expect("Limit query should succeed");
 
-    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-    assert_eq!(total_rows, 2, "LIMIT 2 should return exactly 2 rows");
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 2, "LIMIT 2 should return exactly 2 rows");
+    }
+
+    // Test data evolution table
+    {
+        let batches = collect_query(
+            "data_evolution_table",
+            "SELECT id, name FROM data_evolution_table LIMIT 3",
+        )
+        .await
+        .expect("Limit query on data evolution table should succeed");
+
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(
+            total_rows, 3,
+            "LIMIT 3 should return exactly 3 rows for data evolution table"
+        );
+
+        // Verify the data is from the merged result (not raw files)
+        let mut rows = extract_id_name_rows(&batches);
+        rows.sort_by_key(|(id, _)| *id);
+
+        // LIMIT 3 returns ids 1, 2, 3 with merged values
+        assert_eq!(
+            rows,
+            vec![
+                (1, "alice-v2".to_string()),
+                (2, "bob".to_string()),
+                (3, "carol-v2".to_string()),
+            ],
+            "Data evolution table LIMIT 3 should return merged rows"
+        );
+    }
 }
 
 // ======================= Catalog Provider Tests =======================

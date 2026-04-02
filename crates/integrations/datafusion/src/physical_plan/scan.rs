@@ -150,7 +150,7 @@ impl ExecutionPlan for PaimonTableScan {
 
         let stream = futures::stream::once(fut).try_flatten();
 
-        // Apply limit if specified
+        // Enforce the final LIMIT at the DataFusion execution layer.
         let limited_stream: Pin<Box<dyn Stream<Item = DFResult<RecordBatch>> + Send>> =
             if let Some(limit) = limit {
                 let mut remaining = limit;

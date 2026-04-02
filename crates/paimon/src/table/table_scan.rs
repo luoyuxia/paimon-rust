@@ -27,7 +27,7 @@ use crate::spec::{
     IndexManifest, ManifestEntry, PartitionComputer, Predicate, Snapshot,
 };
 use crate::table::bin_pack::split_for_batch;
-use crate::table::source::{DataSplitBuilder, DeletionFile, PartitionBucket, Plan};
+use crate::table::source::{DataSplit, DataSplitBuilder, DeletionFile, PartitionBucket, Plan};
 use crate::table::SnapshotManager;
 use crate::Error;
 use std::collections::{HashMap, HashSet};
@@ -87,6 +87,31 @@ fn filter_manifest_entries(
         .into_iter()
         .filter(|entry| !(deletion_vectors_enabled && entry.file().level == 0))
         .collect()
+}
+
+/// Post-filter manifest entries for limit pushdown.
+///
+/// For append-only tables without deletion vectors, this simply accumulates
+/// row counts and stops adding entries when the limit is reached.
+///
+/// Reference: [AppendOnlyFileStoreScan.postFilterManifestEntries](https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/operation/AppendOnlyFileStoreScan.java#L96)
+fn post_filter_manifest_entries_for_limit(
+    entries: Vec<ManifestEntry>,
+    limit: usize,
+) -> Vec<ManifestEntry> {
+    let mut result = Vec::new();
+    let mut accumulated_row_count: i64 = 0;
+
+    for entry in entries {
+        let row_count = entry.file().row_count;
+        result.push(entry);
+        accumulated_row_count += row_count;
+        if accumulated_row_count >= limit as i64 {
+            break;
+        }
+    }
+
+    result
 }
 
 /// Builds a map from (partition, bucket) to (data_file_name -> DeletionFile) from index manifest entries.
@@ -226,11 +251,18 @@ fn group_by_overlapping_row_id(mut files: Vec<DataFileMeta>) -> Vec<Vec<DataFile
 pub struct TableScan<'a> {
     table: &'a Table,
     filter: Option<Predicate>,
+    /// Optional limit on the number of rows to return.
+    /// When set, the scan will try to return only enough splits to satisfy the limit.
+    limit: Option<usize>,
 }
 
 impl<'a> TableScan<'a> {
-    pub fn new(table: &'a Table, filter: Option<Predicate>) -> Self {
-        Self { table, filter }
+    pub fn new(table: &'a Table, filter: Option<Predicate>, limit: Option<usize>) -> Self {
+        Self {
+            table,
+            filter,
+            limit,
+        }
     }
 
     /// Plan the full scan: read latest snapshot, manifest list, manifest entries, then build DataSplits using bin packing.
@@ -244,6 +276,51 @@ impl<'a> TableScan<'a> {
             None => return Ok(Plan::new(Vec::new())),
         };
         self.plan_snapshot(snapshot).await
+    }
+
+    /// Apply a limit-pushdown hint to the generated splits.
+    ///
+    /// Iterates through splits and accumulates `merged_row_count()` until the
+    /// limit hint is reached. Returns only the splits likely needed to satisfy
+    /// that hint.
+    ///
+    /// This does not guarantee an exact final row count. If any split's
+    /// `merged_row_count()` is `None` (for example because of unknown deletion
+    /// cardinality), all remaining splits are kept and the caller or query
+    /// engine must enforce the final LIMIT.
+    fn apply_limit_pushdown(&self, splits: Vec<DataSplit>) -> Vec<DataSplit> {
+        let limit = match self.limit {
+            Some(l) => l,
+            None => return splits,
+        };
+
+        if splits.is_empty() {
+            return splits;
+        }
+
+        let mut limited_splits = Vec::new();
+        let mut scanned_row_count: i64 = 0;
+
+        for split in splits {
+            match split.merged_row_count() {
+                Some(merged_count) => {
+                    limited_splits.push(split);
+                    scanned_row_count += merged_count;
+                    if scanned_row_count >= limit as i64 {
+                        // We likely have enough rows for the limit hint.
+                        return limited_splits;
+                    }
+                }
+                None => {
+                    // Can't compute merged row count, so keep all remaining
+                    // splits and rely on the caller or query engine to enforce
+                    // the final LIMIT.
+                    limited_splits.push(split);
+                }
+            }
+        }
+
+        limited_splits
     }
 
     async fn plan_snapshot(&self, snapshot: Snapshot) -> crate::Result<Plan> {
@@ -306,6 +383,26 @@ impl<'a> TableScan<'a> {
                 }
             }
             kept
+        } else {
+            entries
+        };
+        if entries.is_empty() {
+            return Ok(Plan::new(Vec::new()));
+        }
+
+        // --- Limit pushdown at manifest entry level (for append-only tables) ---
+        //
+        // For simple append-only tables without deletion vectors or data evolution,
+        // we can apply limit early at the manifest entry level. This is more efficient
+        // than waiting until splits are created.
+        //
+        // Reference: [AppendOnlyFileStoreScan.postFilterManifestEntries](https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/operation/AppendOnlyFileStoreScan.java#L91)
+        let limit_pushdown_at_manifest_level = self.table.schema.primary_keys().is_empty()
+            && self.limit.is_some()
+            && !deletion_vectors_enabled
+            && !data_evolution_enabled;
+        let entries = if limit_pushdown_at_manifest_level {
+            post_filter_manifest_entries_for_limit(entries, self.limit.unwrap())
         } else {
             entries
         };
@@ -425,6 +522,10 @@ impl<'a> TableScan<'a> {
                 splits.push(builder.build()?);
             }
         }
+
+        // Apply limit pushdown to reduce the number of splits if possible
+        let splits = self.apply_limit_pushdown(splits);
+
         Ok(Plan::new(splits))
     }
 }

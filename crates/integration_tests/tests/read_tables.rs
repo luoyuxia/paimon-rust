@@ -947,3 +947,93 @@ async fn test_read_data_evolution_table_with_projection() {
         "Projected data evolution read should return correct values"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Limit pushdown integration tests
+// ---------------------------------------------------------------------------
+
+/// Helper function to scan and read with limit pushdown.
+async fn plan_table(table: &paimon::Table, limit: Option<usize>) -> Plan {
+    let mut read_builder = table.new_read_builder();
+    if let Some(limit) = limit {
+        read_builder.with_limit(limit);
+    }
+    let scan = read_builder.new_scan();
+    scan.plan().await.expect("Failed to plan scan")
+}
+
+/// Test limit pushdown: when limit is smaller than total rows, fewer data files may be generated.
+#[tokio::test]
+async fn test_limit_pushdown() {
+    let catalog = create_file_system_catalog();
+
+    // Test append-only table (simple_log_table)
+    {
+        let table = get_table_from_catalog(&catalog, "simple_log_table").await;
+
+        // Get the full plan without limit
+        let full_plan = plan_table(&table, None).await;
+        let full_data_file_count: usize = full_plan
+            .splits()
+            .iter()
+            .map(|split| split.data_files().len())
+            .sum();
+
+        // Get the plan with limit = 1
+        let limited_plan = plan_table(&table, Some(1)).await;
+        let limited_data_file_count: usize = limited_plan
+            .splits()
+            .iter()
+            .map(|split| split.data_files().len())
+            .sum();
+
+        // Verify limit pushdown worked:
+        // - Limited data files should be < full data files
+        assert!(
+            limited_data_file_count < full_data_file_count,
+            "Limit pushdown should reduce data file count for append-only table: limited={limited_data_file_count}, full={full_data_file_count}"
+        );
+
+        // Verify splits are raw_convertible for append-only tables
+        for split in limited_plan.splits() {
+            assert!(
+                split.raw_convertible(),
+                "Append-only table splits should have raw_convertible = true"
+            );
+        }
+    }
+
+    // Test data evolution table
+    {
+        let table = get_table_from_catalog(&catalog, "data_evolution_table").await;
+
+        // Get full plan without limit
+        let full_plan = plan_table(&table, None).await;
+        let full_data_split_count: usize = full_plan.splits().iter().count();
+
+        // Get the plan with limit = 2
+        let limited_plan = plan_table(&table, Some(2)).await;
+        let limited_data_split_count: usize = limited_plan.splits().iter().count();
+
+        // For data evolution tables, limit pushdown at split level uses merged_row_count
+        // The limited data split count should be < full data split count
+        assert!(
+            limited_data_split_count < full_data_split_count,
+            "Limit pushdown should reduce data split count for data evolution table: limited={limited_data_split_count}, full={full_data_split_count}"
+        );
+
+        // Verify data evolution splits have merged_row_count
+        for split in full_plan.splits() {
+            let merged_count = split.merged_row_count().expect(
+                "Data evolution table should have merged_row_count (all files should have first_row_id)",
+            );
+            // merged_row_count should be < row_count (overlapping ranges reduce count)
+            assert!(
+                merged_count < split.row_count(),
+                "merged_row_count ({}) should be < row_count ({})",
+                merged_count,
+                split.row_count()
+            );
+        }
+    }
+}

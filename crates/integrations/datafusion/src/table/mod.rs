@@ -119,8 +119,11 @@ impl TableProvider for PaimonTableProvider {
         if let Some(filter) = build_pushed_predicate(filters, self.table.schema().fields()) {
             read_builder.with_filter(filter);
         }
-        let read_builder = self.table.new_read_builder();
-        // todo: publish limit to paimon-core to plan
+        // Push the limit hint to paimon-core planning to reduce splits when possible.
+        // DataFusion still enforces the final LIMIT semantics.
+        if let Some(limit) = limit {
+            read_builder.with_limit(limit);
+        }
         let scan = read_builder.new_scan();
         let plan = scan.plan().await.map_err(to_datafusion_error)?;
 
