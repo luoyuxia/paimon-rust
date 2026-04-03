@@ -89,31 +89,6 @@ fn filter_manifest_entries(
         .collect()
 }
 
-/// Post-filter manifest entries for limit pushdown.
-///
-/// For append-only tables without deletion vectors, this simply accumulates
-/// row counts and stops adding entries when the limit is reached.
-///
-/// Reference: [AppendOnlyFileStoreScan.postFilterManifestEntries](https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/operation/AppendOnlyFileStoreScan.java#L96)
-fn post_filter_manifest_entries_for_limit(
-    entries: Vec<ManifestEntry>,
-    limit: usize,
-) -> Vec<ManifestEntry> {
-    let mut result = Vec::new();
-    let mut accumulated_row_count: i64 = 0;
-
-    for entry in entries {
-        let row_count = entry.file().row_count;
-        result.push(entry);
-        accumulated_row_count += row_count;
-        if accumulated_row_count >= limit as i64 {
-            break;
-        }
-    }
-
-    result
-}
-
 /// Builds a map from (partition, bucket) to (data_file_name -> DeletionFile) from index manifest entries.
 /// Only considers ADD entries with index_type "DELETION_VECTORS" and their deletion_vectors_ranges.
 fn build_deletion_files_map(
@@ -198,7 +173,7 @@ fn partition_matches_predicate(
 /// Files without `first_row_id` become their own group.
 ///
 /// Reference: [DataEvolutionSplitGenerator](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/table/source/splitread/DataEvolutionSplitGenerator.java)
-fn group_by_overlapping_row_id(mut files: Vec<DataFileMeta>) -> Vec<Vec<DataFileMeta>> {
+pub(crate) fn group_by_overlapping_row_id(mut files: Vec<DataFileMeta>) -> Vec<Vec<DataFileMeta>> {
     files.sort_by(|a, b| {
         let a_row_id = a.first_row_id.unwrap_or(i64::MIN);
         let b_row_id = b.first_row_id.unwrap_or(i64::MIN);
@@ -284,10 +259,12 @@ impl<'a> TableScan<'a> {
     /// limit hint is reached. Returns only the splits likely needed to satisfy
     /// that hint.
     ///
-    /// This does not guarantee an exact final row count. If any split's
+    /// This does not guarantee an exact final row count. If a split's
     /// `merged_row_count()` is `None` (for example because of unknown deletion
-    /// cardinality), all remaining splits are kept and the caller or query
-    /// engine must enforce the final LIMIT.
+    /// cardinality), that split is kept even though its contribution to the
+    /// limit is unknown. Planning may still stop early later if the
+    /// accumulated known `merged_row_count()` reaches the limit, and the
+    /// caller or query engine must enforce the final LIMIT.
     fn apply_limit_pushdown(&self, splits: Vec<DataSplit>) -> Vec<DataSplit> {
         let limit = match self.limit {
             Some(l) => l,
@@ -312,9 +289,9 @@ impl<'a> TableScan<'a> {
                     }
                 }
                 None => {
-                    // Can't compute merged row count, so keep all remaining
-                    // splits and rely on the caller or query engine to enforce
-                    // the final LIMIT.
+                    // Can't compute merged row count, so keep this split and
+                    // rely on the caller or query engine to enforce the final
+                    // LIMIT.
                     limited_splits.push(split);
                 }
             }
@@ -383,26 +360,6 @@ impl<'a> TableScan<'a> {
                 }
             }
             kept
-        } else {
-            entries
-        };
-        if entries.is_empty() {
-            return Ok(Plan::new(Vec::new()));
-        }
-
-        // --- Limit pushdown at manifest entry level (for append-only tables) ---
-        //
-        // For simple append-only tables without deletion vectors or data evolution,
-        // we can apply limit early at the manifest entry level. This is more efficient
-        // than waiting until splits are created.
-        //
-        // Reference: [AppendOnlyFileStoreScan.postFilterManifestEntries](https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/operation/AppendOnlyFileStoreScan.java#L91)
-        let limit_pushdown_at_manifest_level = self.table.schema.primary_keys().is_empty()
-            && self.limit.is_some()
-            && !deletion_vectors_enabled
-            && !data_evolution_enabled;
-        let entries = if limit_pushdown_at_manifest_level {
-            post_filter_manifest_entries_for_limit(entries, self.limit.unwrap())
         } else {
             entries
         };

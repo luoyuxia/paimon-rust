@@ -22,8 +22,8 @@
 #![allow(dead_code)]
 
 use crate::spec::{BinaryRow, DataFileMeta};
+use crate::table::table_scan::group_by_overlapping_row_id;
 use serde::{Deserialize, Serialize};
-
 // ======================= DeletionFile ===============================
 
 /// Deletion file for a data file: describes a region in a file that stores deletion vector bitmap.
@@ -261,7 +261,7 @@ impl DataSplit {
         }
 
         // Merge overlapping row ID ranges and compute max row_count per group
-        let groups = merge_overlapping_row_id_ranges(&self.data_files);
+        let groups = group_by_overlapping_row_id(self.data_files.to_vec());
         let sum: i64 = groups
             .iter()
             .map(|group| group.iter().map(|f| f.row_count).max().unwrap_or(0))
@@ -422,61 +422,4 @@ impl Plan {
     pub fn splits(&self) -> &[DataSplit] {
         &self.splits
     }
-}
-
-// ======================= Helper Functions ===============================
-
-/// Merges overlapping row ID ranges into groups.
-///
-/// Files are sorted by `(start, end)` of their row ID range, then grouped
-/// by overlapping ranges. Two ranges overlap if `current.start <= previous_group_end`.
-///
-/// Reference: [RangeHelper.mergeOverlappingRanges()](https://github.com/apache/paimon/blob/release-1.3/paimon-common/src/main/java/org/apache/paimon/utils/RangeHelper.java#L59)
-fn merge_overlapping_row_id_ranges(files: &[DataFileMeta]) -> Vec<Vec<&DataFileMeta>> {
-    if files.is_empty() {
-        return Vec::new();
-    }
-
-    // Create indexed list with row_id_range
-    let mut indexed: Vec<(usize, &DataFileMeta, i64, i64)> = files
-        .iter()
-        .enumerate()
-        .filter_map(|(i, f)| f.row_id_range().map(|(start, end)| (i, f, start, end)))
-        .collect();
-
-    if indexed.is_empty() {
-        return Vec::new();
-    }
-
-    // Sort by (start, end)
-    indexed.sort_by(|a, b| a.2.cmp(&b.2).then(a.3.cmp(&b.3)));
-
-    let mut groups: Vec<Vec<(usize, &DataFileMeta)>> = Vec::new();
-    let mut current_group: Vec<(usize, &DataFileMeta)> = vec![(indexed[0].0, indexed[0].1)];
-    let mut current_end = indexed[0].3;
-
-    for &(orig_idx, file, start, end) in &indexed[1..] {
-        if start <= current_end {
-            // Overlaps with current group
-            current_group.push((orig_idx, file));
-            if end > current_end {
-                current_end = end;
-            }
-        } else {
-            // Start new group
-            groups.push(current_group);
-            current_group = vec![(orig_idx, file)];
-            current_end = end;
-        }
-    }
-    groups.push(current_group);
-
-    // Sort each group by original index and extract file references
-    groups
-        .into_iter()
-        .map(|mut g| {
-            g.sort_by_key(|(idx, _)| *idx);
-            g.into_iter().map(|(_, f)| f).collect()
-        })
-        .collect()
 }
