@@ -15,8 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#![allow(dead_code)]
-
 use crate::deletion_vector::core::DeletionVector;
 use crate::io::{FileIO, FileRead};
 use crate::spec::DataFileMeta;

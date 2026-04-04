@@ -28,7 +28,6 @@ use crate::Result;
 /// Manifest entry for index file.
 ///
 /// Impl Reference: <https://github.com/apache/paimon/blob/release-0.8.2/paimon-core/src/main/java/org/apache/paimon/manifest/IndexManifestEntry.java>
-#[allow(dead_code)] // Part of spec; used when index manifest is implemented.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexManifestEntry {
     #[serde(rename = "_KIND")]

@@ -19,7 +19,6 @@ use serde::de::DeserializeOwned;
 use serde_avro_fast::object_container_file_encoding::Reader;
 use snafu::ResultExt;
 
-#[allow(dead_code)]
 pub fn from_avro_bytes<T: DeserializeOwned>(bytes: &[u8]) -> crate::Result<Vec<T>> {
     let mut reader = Reader::from_slice(bytes)
         .whatever_context::<_, crate::Error>("read avro object container")?;

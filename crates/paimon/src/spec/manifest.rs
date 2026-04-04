@@ -30,7 +30,6 @@ use crate::Result;
 /// Impl Reference: <https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/manifest/ManifestFile.java>
 pub struct Manifest;
 
-#[allow(dead_code)]
 impl Manifest {
     /// Read manifest entries from a file.
     ///

@@ -21,7 +21,6 @@ use crate::types::paimon_bytes;
 
 /// Error codes for paimon C API.
 #[repr(i32)]
-#[allow(dead_code)]
 pub enum PaimonErrorCode {
     Unexpected = 0,
     Unsupported = 1,

@@ -428,7 +428,6 @@ impl Display for DataFileMeta {
     }
 }
 
-#[allow(dead_code)]
 impl DataFileMeta {
     /// Returns the row ID range `[first_row_id, first_row_id + row_count - 1]` if `first_row_id` is set.
     pub fn row_id_range(&self) -> Option<(i64, i64)> {
