@@ -543,7 +543,6 @@ async fn test_read_partitioned_table_with_filter() {
 
     let catalog = create_file_system_catalog();
     let table = get_table_from_catalog(&catalog, "partitioned_log_table").await;
-    // Build a filter: dt = '2024-01-01'
     let schema = table.schema();
     let pb = PredicateBuilder::new(schema.fields());
     let filter = pb
@@ -577,7 +576,6 @@ async fn test_read_multi_partitioned_table_with_filter() {
     let schema = table.schema();
     let pb = PredicateBuilder::new(schema.fields());
 
-    // Filter: dt = '2024-01-01' AND hr = 10
     let filter = Predicate::and(vec![
         pb.equal("dt", Datum::String("2024-01-01".into())).unwrap(),
         pb.equal("hr", Datum::Int(10)).unwrap(),
@@ -600,7 +598,7 @@ async fn test_read_multi_partitioned_table_with_filter() {
 }
 
 #[tokio::test]
-async fn test_read_partitioned_table_data_only_filter_preserves_all_partitions() {
+async fn test_read_partitioned_table_data_only_filter_prunes_all_files() {
     use paimon::spec::{Datum, PredicateBuilder};
 
     let catalog = create_file_system_catalog();
@@ -608,8 +606,6 @@ async fn test_read_partitioned_table_data_only_filter_preserves_all_partitions()
     let schema = table.schema();
     let pb = PredicateBuilder::new(schema.fields());
 
-    // Data-only filter: id > 10 — should NOT prune any partitions,
-    // and is still ignored at read level in Phase 2.
     let filter = pb
         .greater_than("id", Datum::Int(10))
         .expect("Failed to build predicate");
@@ -618,8 +614,106 @@ async fn test_read_partitioned_table_data_only_filter_preserves_all_partitions()
     let seen_partitions = extract_plan_partitions(&plan);
     assert_eq!(
         seen_partitions,
-        HashSet::from(["2024-01-01".into(), "2024-01-02".into()]),
-        "Data-only filter should not prune any partitions"
+        HashSet::<String>::new(),
+        "Data-only filter should prune all files when stats prove no match"
+    );
+
+    let actual = extract_id_name(&batches);
+    assert_eq!(
+        actual,
+        Vec::<(i32, String)>::new(),
+        "No rows should be planned when stats prove the predicate is unsatisfiable"
+    );
+}
+
+#[tokio::test]
+async fn test_read_partitioned_table_mixed_and_filter() {
+    use paimon::spec::{Datum, Predicate, PredicateBuilder};
+
+    let catalog = create_file_system_catalog();
+    let table = get_table_from_catalog(&catalog, "partitioned_log_table").await;
+    let schema = table.schema();
+    let pb = PredicateBuilder::new(schema.fields());
+
+    let filter = Predicate::and(vec![
+        pb.equal("dt", Datum::String("2024-01-01".into())).unwrap(),
+        pb.greater_than("id", Datum::Int(10)).unwrap(),
+    ]);
+
+    let (plan, batches) = scan_and_read_with_filter(&table, filter).await;
+    let seen_partitions = extract_plan_partitions(&plan);
+    assert_eq!(
+        seen_partitions,
+        HashSet::<String>::new(),
+        "The matching partition should also be pruned when file stats prove no match"
+    );
+
+    let actual = extract_id_name(&batches);
+    assert_eq!(
+        actual,
+        Vec::<(i32, String)>::new(),
+        "No rows should remain after partition pruning and data stats pruning"
+    );
+}
+
+#[tokio::test]
+async fn test_read_partitioned_table_data_only_filter_keeps_matching_partition() {
+    use paimon::spec::{Datum, PredicateBuilder};
+
+    let catalog = create_file_system_catalog();
+    let table = get_table_from_catalog(&catalog, "partitioned_log_table").await;
+    let schema = table.schema();
+    let pb = PredicateBuilder::new(schema.fields());
+
+    let filter = pb
+        .greater_than("id", Datum::Int(2))
+        .expect("Failed to build predicate");
+
+    let (plan, batches) = scan_and_read_with_filter(&table, filter).await;
+    let seen_partitions = extract_plan_partitions(&plan);
+    assert_eq!(
+        seen_partitions,
+        HashSet::from(["2024-01-02".into()]),
+        "Only files whose stats may satisfy the predicate should remain in the plan"
+    );
+
+    let actual = extract_id_name(&batches);
+    assert_eq!(
+        actual,
+        vec![(3, "carol".to_string())],
+        "Only rows from files that survive stats pruning should be returned"
+    );
+}
+
+/// Java-style inclusive projection can still extract partition predicates from
+/// an OR of mixed AND branches.
+#[tokio::test]
+async fn test_read_multi_partitioned_table_or_of_mixed_ands_prunes_partitions() {
+    use paimon::spec::{Datum, Predicate, PredicateBuilder};
+
+    let catalog = create_file_system_catalog();
+    let table = get_table_from_catalog(&catalog, "multi_partitioned_log_table").await;
+    let schema = table.schema();
+    let pb = PredicateBuilder::new(schema.fields());
+
+    let filter = Predicate::or(vec![
+        Predicate::and(vec![
+            pb.equal("dt", Datum::String("2024-01-01".into())).unwrap(),
+            pb.equal("hr", Datum::Int(10)).unwrap(),
+            pb.greater_than("id", Datum::Int(10)).unwrap(),
+        ]),
+        Predicate::and(vec![
+            pb.equal("dt", Datum::String("2024-01-01".into())).unwrap(),
+            pb.equal("hr", Datum::Int(20)).unwrap(),
+        ]),
+    ]);
+
+    let (plan, batches) = scan_and_read_with_filter(&table, filter).await;
+    let seen_partitions = extract_plan_multi_partitions(&plan);
+    assert_eq!(
+        seen_partitions,
+        HashSet::from([("2024-01-01".into(), 10), ("2024-01-01".into(), 20)]),
+        "Inclusive projection should prune the dt=2024-01-02 partition"
     );
 
     let actual = extract_id_name(&batches);
@@ -630,46 +724,12 @@ async fn test_read_partitioned_table_data_only_filter_preserves_all_partitions()
             (2, "bob".to_string()),
             (3, "carol".to_string()),
         ],
-        "Data predicate is not applied at read level; all rows are still returned"
+        "All rows from the surviving partitions should be returned"
     );
 }
 
-/// Mixed AND: partition predicate prunes partitions, but data predicate is
-/// silently ignored — all rows from the matching partition are returned.
-#[tokio::test]
-async fn test_read_partitioned_table_mixed_and_filter() {
-    use paimon::spec::{Datum, Predicate, PredicateBuilder};
-
-    let catalog = create_file_system_catalog();
-    let table = get_table_from_catalog(&catalog, "partitioned_log_table").await;
-    let schema = table.schema();
-    let pb = PredicateBuilder::new(schema.fields());
-
-    // dt = '2024-01-01' AND id > 10
-    // Partition conjunct (dt) is applied; data conjunct (id) is NOT.
-    let filter = Predicate::and(vec![
-        pb.equal("dt", Datum::String("2024-01-01".into())).unwrap(),
-        pb.greater_than("id", Datum::Int(10)).unwrap(),
-    ]);
-
-    let (plan, batches) = scan_and_read_with_filter(&table, filter).await;
-    let seen_partitions = extract_plan_partitions(&plan);
-    assert_eq!(
-        seen_partitions,
-        HashSet::from(["2024-01-01".into()]),
-        "Only dt=2024-01-01 should survive"
-    );
-
-    let actual = extract_id_name(&batches);
-    assert_eq!(
-        actual,
-        vec![(1, "alice".to_string()), (2, "bob".to_string())],
-        "Data predicate (id > 10) is NOT applied — all rows from matching partition returned"
-    );
-}
-
-/// Mixed OR: `dt = '...' OR id > 10` cannot be split into a pure partition
-/// predicate, so no partitions should be pruned.
+/// A directly mixed OR like `dt = '...' OR id > 10` is still not safely
+/// splittable into a partition predicate, so no partitions should be pruned.
 #[tokio::test]
 async fn test_read_partitioned_table_mixed_or_filter_preserves_all() {
     use paimon::spec::{Datum, Predicate, PredicateBuilder};
@@ -679,7 +739,6 @@ async fn test_read_partitioned_table_mixed_or_filter_preserves_all() {
     let schema = table.schema();
     let pb = PredicateBuilder::new(schema.fields());
 
-    // dt = '2024-01-01' OR id > 10 — mixed OR is not safely splittable.
     let filter = Predicate::or(vec![
         pb.equal("dt", Datum::String("2024-01-01".into())).unwrap(),
         pb.greater_than("id", Datum::Int(10)).unwrap(),
@@ -705,7 +764,7 @@ async fn test_read_partitioned_table_mixed_or_filter_preserves_all() {
     );
 }
 
-/// Filter that matches no existing partition — all entries pruned, 0 splits.
+/// A filter that matches no partition should produce no splits.
 #[tokio::test]
 async fn test_read_partitioned_table_filter_matches_no_partition() {
     use paimon::spec::{Datum, PredicateBuilder};
@@ -715,7 +774,6 @@ async fn test_read_partitioned_table_filter_matches_no_partition() {
     let schema = table.schema();
     let pb = PredicateBuilder::new(schema.fields());
 
-    // dt = '9999-12-31' matches no partition.
     let filter = pb
         .equal("dt", Datum::String("9999-12-31".into()))
         .expect("Failed to build predicate");
@@ -744,8 +802,7 @@ async fn test_read_partitioned_table_eval_row_error_fails_plan() {
         .position(|f| f.name() == "dt")
         .expect("dt partition column should exist");
 
-    // Use an unsupported DataType in a partition leaf so remapping succeeds
-    // but `eval_row` fails during partition pruning.
+    // Use an unsupported partition type so remapping succeeds but `eval_row` fails.
     let filter = Predicate::Leaf {
         column: "dt".into(),
         index: dt_index,
@@ -1083,6 +1140,100 @@ async fn test_read_schema_evolution_type_promotion() {
         rows,
         vec![(1, 100i64), (2, 200i64), (3, 3_000_000_000i64)],
         "INT values should be promoted to BIGINT, including values > INT_MAX"
+    );
+}
+
+/// Stats pruning should treat a newly added column as all-NULL for old files.
+#[tokio::test]
+async fn test_stats_pruning_schema_evolution_added_column_eq_prunes_old_files() {
+    use paimon::spec::{Datum, PredicateBuilder};
+
+    let catalog = create_file_system_catalog();
+    let table = get_table_from_catalog(&catalog, "schema_evolution_add_column").await;
+    let pb = PredicateBuilder::new(table.schema().fields());
+    let filter = pb
+        .equal("age", Datum::Int(30))
+        .expect("Failed to build predicate");
+
+    let (plan, batches) = scan_and_read_with_filter(&table, filter).await;
+    assert_eq!(
+        plan.splits().len(),
+        1,
+        "Only the file written after ADD COLUMN should survive stats pruning"
+    );
+
+    let actual = extract_id_name(&batches);
+    assert_eq!(
+        actual,
+        vec![(3, "carol".to_string())],
+        "Old files missing 'age' and rows with age != 30 should be pruned"
+    );
+}
+
+/// Stats pruning should keep only old files for IS NULL on a newly added column.
+#[tokio::test]
+async fn test_stats_pruning_schema_evolution_added_column_is_null_prunes_new_files() {
+    use paimon::spec::PredicateBuilder;
+
+    let catalog = create_file_system_catalog();
+    let table = get_table_from_catalog(&catalog, "schema_evolution_add_column").await;
+    let pb = PredicateBuilder::new(table.schema().fields());
+    let filter = pb.is_null("age").expect("Failed to build predicate");
+
+    let (plan, batches) = scan_and_read_with_filter(&table, filter).await;
+    assert_eq!(
+        plan.splits().len(),
+        1,
+        "Only files missing 'age' should survive stats pruning for age IS NULL"
+    );
+
+    let actual = extract_id_name(&batches);
+    assert_eq!(
+        actual,
+        vec![(1, "alice".to_string()), (2, "bob".to_string())],
+        "New files with non-null age should be pruned for age IS NULL"
+    );
+}
+
+/// Stats pruning should still work after INT -> BIGINT type promotion.
+#[tokio::test]
+async fn test_stats_pruning_schema_evolution_type_promotion_prunes_old_int_files() {
+    use paimon::spec::{Datum, PredicateBuilder};
+
+    let catalog = create_file_system_catalog();
+    let table = get_table_from_catalog(&catalog, "schema_evolution_type_promotion").await;
+    let pb = PredicateBuilder::new(table.schema().fields());
+    let filter = pb
+        .greater_than("value", Datum::Long(250))
+        .expect("Failed to build predicate");
+
+    let (plan, batches) = scan_and_read_with_filter(&table, filter).await;
+    assert_eq!(
+        plan.splits().len(),
+        1,
+        "Old INT files should still be pruned using promoted BIGINT predicates"
+    );
+
+    let mut rows: Vec<(i32, i64)> = Vec::new();
+    for batch in &batches {
+        let id = batch
+            .column_by_name("id")
+            .and_then(|c| c.as_any().downcast_ref::<Int32Array>())
+            .expect("id");
+        let value = batch
+            .column_by_name("value")
+            .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+            .expect("value");
+        for i in 0..batch.num_rows() {
+            rows.push((id.value(i), value.value(i)));
+        }
+    }
+    rows.sort_by_key(|(id, _)| *id);
+
+    assert_eq!(
+        rows,
+        vec![(3, 3_000_000_000i64)],
+        "Only the BIGINT file should remain after value > 250 pruning"
     );
 }
 
