@@ -105,6 +105,13 @@ jobs:
           RUST_LOG: DEBUG
           RUST_BACKTRACE: full
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Python Binding Integration Test
+        working-directory: bindings/python
+        run: make install && make test
+
       - name: Go Integration Test
         working-directory: bindings/go
         run: make test

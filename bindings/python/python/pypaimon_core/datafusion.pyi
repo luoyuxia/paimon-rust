@@ -15,23 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
-[workspace]
-resolver = "2"
-members = ["crates/paimon", "crates/integration_tests", "bindings/c", "bindings/python", "crates/integrations/datafusion"]
+from typing import Dict, List, Optional
 
-[workspace.package]
-version = "0.0.0"
-edition = "2021"
-homepage = "https://paimon.apache.org/docs/rust/"
-repository = "https://github.com/apache/paimon-rust"
-license = "Apache-2.0"
-rust-version = "1.86.0"
+import pyarrow
 
-[workspace.dependencies]
-arrow = "57.0"
-arrow-array = { version = "57.0", features = ["ffi"] }
-arrow-schema = "57.0"
-arrow-cast = "57.0"
-datafusion = "52.3.0"
-parquet = "57.0"
-tokio = "1.39.2"
+class PaimonContext:
+    def __init__(
+        self,
+        catalog_options: Dict[str, str],
+        catalog_name: Optional[str] = None,
+        datafusion_config: Optional[Dict[str, str]] = None,
+    ) -> None: ...
+    def sql(self, query: str) -> DataFrame: ...
+
+class DataFrame:
+    def collect(self) -> List[pyarrow.RecordBatch]: ...
+    def show(self) -> None: ...
