@@ -15,19 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Dict, List, Optional
+from typing import Any, Dict
 
-import pyarrow
-
-class PaimonContext:
-    def __init__(
-        self,
-        catalog_options: Dict[str, str],
-        catalog_name: Optional[str] = None,
-        datafusion_config: Optional[Dict[str, str]] = None,
-    ) -> None: ...
-    def sql(self, query: str) -> DataFrame: ...
-
-class DataFrame:
-    def collect(self) -> List[pyarrow.RecordBatch]: ...
-    def show(self) -> None: ...
+class PaimonCatalog:
+    def __init__(self, catalog_options: Dict[str, str]) -> None: ...
+    def __datafusion_catalog_provider__(self, session: Any) -> object: ...

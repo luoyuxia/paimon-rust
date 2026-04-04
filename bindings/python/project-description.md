@@ -19,7 +19,7 @@
 
 # PyPaimon Core
 
-This project is used to build a paimon-rust powered core for pypaimon, and intended for use only by pypaimon.
+This project builds the Rust-powered core for [PyPaimon](https://paimon.apache.org/docs/master/pypaimon/overview/) while also providing DataFusion integration for querying Paimon tables.
 
 Install via PyPI:
 
@@ -27,76 +27,43 @@ Install via PyPI:
 pip install pypaimon-core
 ```
 
+If you want to use the native Python DataFusion `SessionContext`, install `datafusion` as well.
+
 ## Query Paimon Tables with DataFusion
 
-`pypaimon-core` provides a built-in DataFusion integration through `PaimonContext`.
-It creates a Paimon catalog from an options dict and registers it into a DataFusion session,
-so you can query any Paimon table with SQL directly.
+`pypaimon-core` provides a `PaimonCatalog` that can be registered into the native DataFusion `SessionContext`.
+This keeps the standard DataFusion Python API available for regular queries.
 
 ```python
-import pyarrow as pa
-from pypaimon_core.datafusion import PaimonContext
+from datafusion import SessionContext
+from pypaimon_core.datafusion import PaimonCatalog
 
-# Create a context with a filesystem catalog
-ctx = PaimonContext(catalog_options={
+catalog = PaimonCatalog({
     "warehouse": "/path/to/warehouse",
 })
 
-# Query tables via SQL (catalog.database.table)
-df = ctx.sql("SELECT * FROM paimon.`default`.my_table LIMIT 10")
-df.show()
+ctx = SessionContext()
+ctx.register_catalog_provider("paimon", catalog)
 
-# Collect results as PyArrow RecordBatches
-batches = df.collect()
+# Query tables via SQL (catalog.database.table)
+df = ctx.sql("SELECT * FROM paimon.default.my_table LIMIT 10")
+df.show()
 ```
 
 ### REST Catalog
 
 ```python
-ctx = PaimonContext(catalog_options={
+from datafusion import SessionContext
+from pypaimon_core.datafusion import PaimonCatalog
+
+catalog = PaimonCatalog({
     "metastore": "rest",
     "uri": "http://localhost:8080",
     "warehouse": "my_warehouse",
 })
+
+ctx = SessionContext()
+ctx.register_catalog_provider("paimon", catalog)
 ```
 
-### Time Travel
-
-Time travel is supported via standard SQL `FOR SYSTEM_TIME AS OF` syntax:
-
-```python
-# Travel to a specific snapshot id
-df = ctx.sql("SELECT * FROM paimon.`default`.my_table FOR SYSTEM_TIME AS OF 1")
-
-# Travel to a specific timestamp
-df = ctx.sql("SELECT * FROM paimon.`default`.my_table FOR SYSTEM_TIME AS OF '2024-01-01 00:00:00'")
-
-# Travel to a tag
-df = ctx.sql("SELECT * FROM paimon.`default`.my_table FOR SYSTEM_TIME AS OF 'my_tag'")
-```
-
-### DataFusion Configuration
-
-`PaimonContext` uses BigQuery SQL dialect by default to enable time travel syntax.
-You can pass additional DataFusion session configuration via the `datafusion_config` parameter:
-
-```python
-ctx = PaimonContext(
-    catalog_options={"warehouse": "/path/to/warehouse"},
-    datafusion_config={
-        "datafusion.execution.target_partitions": "8",
-        "datafusion.execution.batch_size": "4096",
-    },
-)
-```
-
-To override the default dialect:
-
-```python
-ctx = PaimonContext(
-    catalog_options={"warehouse": "/path/to/warehouse"},
-    datafusion_config={
-        "datafusion.sql_parser.dialect": "Generic",
-    },
-)
-```
+Time travel queries are not supported in the Python binding at this time.

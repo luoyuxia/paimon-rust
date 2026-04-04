@@ -19,17 +19,21 @@
 
 # PyPaimon Core
 
-This project is used to build a paimon-rust powered core for [PyPaimon](https://paimon.apache.org/).
+This project builds the Rust-powered core for [PyPaimon](https://paimon.apache.org/docs/master/pypaimon/overview/) while also providing DataFusion integration for querying Paimon tables.
 
 ## Usage
 
+For DataFusion queries, use the native `SessionContext` and register a `PaimonCatalog`:
+
 ```python
-import pyarrow as pa
-from pypaimon_core.datafusion import PaimonContext
+from datafusion import SessionContext
+from pypaimon_core.datafusion import PaimonCatalog
 
-ctx = PaimonContext(catalog_options={"warehouse": "/path/to/warehouse"})
+catalog = PaimonCatalog({"warehouse": "/path/to/warehouse"})
+ctx = SessionContext()
+ctx.register_catalog_provider("paimon", catalog)
 
-df = ctx.sql("SELECT * FROM paimon.`default`.my_table")
+df = ctx.sql("SELECT * FROM paimon.default.my_table")
 df.show()
 ```
 
@@ -65,4 +69,4 @@ cd bindings/python
 
 ```shell
 make test
-```
+```````

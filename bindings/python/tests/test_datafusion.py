@@ -18,8 +18,9 @@
 import os
 
 import pyarrow as pa
+from datafusion import SessionContext
 
-from pypaimon_core.datafusion import PaimonContext
+from pypaimon_core.datafusion import PaimonCatalog
 
 WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE", "/tmp/paimon-warehouse")
 
@@ -29,41 +30,15 @@ def extract_rows(batches):
     return sorted(zip(table["id"].to_pylist(), table["name"].to_pylist()))
 
 
-def test_time_travel():
-    ctx = PaimonContext(catalog_options={"warehouse": WAREHOUSE})
+def test_query_simple_table_via_catalog_provider():
+    catalog = PaimonCatalog({"warehouse": WAREHOUSE})
+    ctx = SessionContext()
+    ctx.register_catalog_provider("paimon", catalog)
 
-    snapshot1_expected = [(1, "alice"), (2, "bob")]
-    snapshot2_expected = [(1, "alice"), (2, "bob"), (3, "carol"), (4, "dave")]
+    df = ctx.sql("SELECT id, name FROM paimon.default.simple_log_table")
 
-    # Time travel by snapshot id
-    df = ctx.sql(
-        "SELECT id, name FROM paimon.`default`.time_travel_table "
-        "FOR SYSTEM_TIME AS OF 1"
-    )
-    assert extract_rows(df.collect()) == snapshot1_expected
-
-    df = ctx.sql(
-        "SELECT id, name FROM paimon.`default`.time_travel_table "
-        "FOR SYSTEM_TIME AS OF 2"
-    )
-    assert extract_rows(df.collect()) == snapshot2_expected
-
-    # Time travel by tag name
-    df = ctx.sql(
-        "SELECT id, name FROM paimon.`default`.time_travel_table "
-        "FOR SYSTEM_TIME AS OF 'snapshot1'"
-    )
-    assert extract_rows(df.collect()) == snapshot1_expected
-
-    df = ctx.sql(
-        "SELECT id, name FROM paimon.`default`.time_travel_table "
-        "FOR SYSTEM_TIME AS OF 'snapshot2'"
-    )
-    assert extract_rows(df.collect()) == snapshot2_expected
-
-    # Time travel by timestamp (use a far-future timestamp to get all rows)
-    df = ctx.sql(
-        "SELECT id, name FROM paimon.`default`.time_travel_table "
-        "FOR SYSTEM_TIME AS OF '2999-12-31 23:59:59'"
-    )
-    assert extract_rows(df.collect()) == snapshot2_expected
+    assert extract_rows(df.collect()) == [
+        (1, "alice"),
+        (2, "bob"),
+        (3, "carol"),
+    ]

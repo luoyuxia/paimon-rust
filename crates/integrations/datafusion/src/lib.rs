@@ -41,6 +41,7 @@ mod error;
 mod filter_pushdown;
 mod physical_plan;
 mod relation_planner;
+mod runtime;
 mod table;
 
 pub use catalog::{PaimonCatalogProvider, PaimonSchemaProvider};

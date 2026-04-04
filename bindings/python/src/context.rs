@@ -16,126 +16,96 @@
 // under the License.
 
 use std::collections::HashMap;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
-use arrow::pyarrow::ToPyArrow;
-use datafusion::dataframe::DataFrame;
-use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion::catalog::CatalogProvider;
+use datafusion_ffi::catalog_provider::FFI_CatalogProvider;
+use datafusion_ffi::proto::logical_extension_codec::FFI_LogicalExtensionCodec;
 use paimon::{CatalogFactory, Options};
-use paimon_datafusion::{PaimonCatalogProvider, PaimonRelationPlanner};
+use paimon_datafusion::PaimonCatalogProvider;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyCapsule;
 
-use crate::error::{df_to_py_err, to_py_err};
+use crate::error::to_py_err;
 use crate::runtime::runtime;
 
-/// A DataFusion session context with a Paimon catalog registered.
-///
-/// Creates a Paimon catalog from the given options and registers it
-/// with a DataFusion session, enabling SQL queries over Paimon tables.
-#[pyclass(name = "PaimonContext")]
-pub struct PaimonContext {
-    ctx: Arc<SessionContext>,
+fn build_paimon_catalog_provider(
+    catalog_options: HashMap<String, String>,
+) -> PyResult<Arc<PaimonCatalogProvider>> {
+    let rt = runtime();
+    rt.block_on(async {
+        let options = Options::from_map(catalog_options);
+        let catalog = CatalogFactory::create(options).await.map_err(to_py_err)?;
+        Ok::<_, PyErr>(Arc::new(PaimonCatalogProvider::new(catalog)))
+    })
+}
+
+fn ffi_logical_codec_from_pycapsule(obj: Bound<'_, PyAny>) -> PyResult<FFI_LogicalExtensionCodec> {
+    let attr_name = "__datafusion_logical_extension_codec__";
+    let capsule = if obj.hasattr(attr_name)? {
+        obj.getattr(attr_name)?.call0()?
+    } else {
+        obj
+    };
+
+    let capsule = capsule.cast::<PyCapsule>()?;
+    let expected_name = c"datafusion_logical_extension_codec";
+    match capsule.name()? {
+        Some(name) if name == expected_name => {}
+        Some(name) => {
+            return Err(PyValueError::new_err(format!(
+                "Expected capsule named {expected_name:?}, got {name:?}"
+            )));
+        }
+        None => {
+            return Err(PyValueError::new_err(format!(
+                "Expected capsule named {expected_name:?}, got unnamed capsule"
+            )));
+        }
+    }
+
+    let data = NonNull::new(capsule.pointer().cast::<FFI_LogicalExtensionCodec>())
+        .ok_or_else(|| PyValueError::new_err("Null logical extension codec capsule pointer"))?;
+    let codec = unsafe { data.as_ref() };
+
+    Ok(codec.clone())
+}
+
+/// A Paimon catalog exportable to Python DataFusion `SessionContext`.
+#[pyclass(name = "PaimonCatalog")]
+pub struct PaimonCatalog {
+    provider: Arc<PaimonCatalogProvider>,
 }
 
 #[pymethods]
-impl PaimonContext {
-    /// Create a new PaimonContext.
-    ///
-    /// Args:
-    ///     catalog_options: Options for creating the Paimon catalog (e.g. {"warehouse": "/path"}).
-    ///     catalog_name: Name to register the catalog under (default: "paimon").
-    ///     datafusion_config: Optional DataFusion session config overrides.
-    ///         Defaults include BigQuery dialect for time travel support.
+impl PaimonCatalog {
+    /// Create a Paimon catalog that can be registered into a DataFusion session.
     #[new]
-    #[pyo3(signature = (catalog_options, catalog_name=None, datafusion_config=None))]
-    fn new(
-        catalog_options: HashMap<String, String>,
-        catalog_name: Option<String>,
-        datafusion_config: Option<HashMap<String, String>>,
-    ) -> PyResult<Self> {
-        let rt = runtime();
-        let catalog_name = catalog_name.unwrap_or_else(|| "paimon".to_string());
-
-        let ctx = rt.block_on(async {
-            // Create Paimon catalog via CatalogFactory
-            let options = Options::from_map(catalog_options);
-            let catalog = CatalogFactory::create(options).await.map_err(to_py_err)?;
-
-            // Default: BigQuery dialect for time travel (FOR SYSTEM_TIME AS OF)
-            let mut config =
-                SessionConfig::new().set_str("datafusion.sql_parser.dialect", "BigQuery");
-
-            // Apply user overrides (can override dialect if needed)
-            if let Some(overrides) = datafusion_config {
-                for (key, value) in overrides {
-                    config = config.set_str(&key, &value);
-                }
-            }
-
-            let ctx = SessionContext::new_with_config(config);
-
-            // Register the Paimon catalog
-            ctx.register_catalog(
-                &catalog_name,
-                Arc::new(PaimonCatalogProvider::new(catalog)),
-            );
-
-            // Register relation planner for time travel (FOR SYSTEM_TIME AS OF)
-            ctx.register_relation_planner(Arc::new(PaimonRelationPlanner::new()))
-                .map_err(df_to_py_err)?;
-
-            Ok::<_, PyErr>(ctx)
-        })?;
-
+    fn new(catalog_options: HashMap<String, String>) -> PyResult<Self> {
         Ok(Self {
-            ctx: Arc::new(ctx),
+            provider: build_paimon_catalog_provider(catalog_options)?,
         })
     }
 
-    /// Execute a SQL query and return a DataFrame.
-    fn sql(&self, py: Python, query: &str) -> PyResult<PyDataFrame> {
-        let ctx = self.ctx.clone();
-        let query = query.to_string();
-        let df = py.detach(move || {
-            let rt = runtime();
-            rt.block_on(async { ctx.sql(&query).await.map_err(df_to_py_err) })
-        })?;
-        Ok(PyDataFrame { df })
-    }
-}
-
-/// A DataFusion DataFrame result that can be collected as PyArrow RecordBatches.
-#[pyclass(name = "DataFrame")]
-pub struct PyDataFrame {
-    df: DataFrame,
-}
-
-#[pymethods]
-impl PyDataFrame {
-    /// Collect all results as a list of PyArrow RecordBatches.
-    fn collect<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyAny>>> {
-        let df = self.df.clone();
-        let batches = py.detach(move || {
-            let rt = runtime();
-            rt.block_on(async { df.collect().await.map_err(df_to_py_err) })
-        })?;
-        batches.iter().map(|batch| batch.to_pyarrow(py)).collect()
-    }
-
-    /// Print the results to stdout.
-    fn show(&self, py: Python) -> PyResult<()> {
-        let df = self.df.clone();
-        py.detach(move || {
-            let rt = runtime();
-            rt.block_on(async { df.show().await.map_err(df_to_py_err) })
-        })
+    /// Export this catalog as a DataFusion catalog provider PyCapsule.
+    fn __datafusion_catalog_provider__<'py>(
+        &self,
+        py: Python<'py>,
+        session: Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyCapsule>> {
+        let name = cr"datafusion_catalog_provider".into();
+        let provider = Arc::clone(&self.provider) as Arc<dyn CatalogProvider + Send>;
+        let codec = ffi_logical_codec_from_pycapsule(session)?;
+        let provider = FFI_CatalogProvider::new_with_ffi_codec(provider, Some(runtime()), codec);
+        PyCapsule::new(py, provider, Some(name))
     }
 }
 
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let this = PyModule::new(py, "datafusion")?;
-    this.add_class::<PaimonContext>()?;
-    this.add_class::<PyDataFrame>()?;
+    this.add_class::<PaimonCatalog>()?;
     m.add_submodule(&this)?;
     py.import("sys")?
         .getattr("modules")?

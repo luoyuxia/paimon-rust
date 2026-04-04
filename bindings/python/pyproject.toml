@@ -45,6 +45,7 @@ python-source = "python"
 include = [
     { path = "LICENSE", format = ["sdist", "wheel"] },
     { path = "NOTICE", format = ["sdist", "wheel"] },
+    { path = "python/pypaimon_core/py.typed", format = ["sdist", "wheel"] },
 ]
 
 [dependency-groups]
@@ -52,4 +53,5 @@ dev = [
     "maturin>=1.9.4,<2.0",
     "pytest>=8.0",
     "pyarrow>=17.0",
+    "datafusion==52.3.0",
 ]
