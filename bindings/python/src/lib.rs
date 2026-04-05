@@ -21,7 +21,7 @@ mod context;
 mod error;
 
 #[pymodule]
-fn pypaimon_core_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn pypaimon_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     context::register_module(py, m)?;
     Ok(())
 }

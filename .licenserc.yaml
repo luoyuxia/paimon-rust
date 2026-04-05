@@ -27,6 +27,6 @@ header:
     - "crates/paimon/tests/**/*.json"
     - "**/go.sum"
     - ".devcontainer/devcontainer.json"
-    - "bindings/python/python/pypaimon_core/py.typed"
+    - "bindings/python/python/pypaimon_rust/py.typed"
 
   comment: on-failure

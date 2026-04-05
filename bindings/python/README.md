@@ -17,7 +17,7 @@
   ~ under the License.
 -->
 
-# PyPaimon Core
+# PyPaimon Rust
 
 This project builds the Rust-powered core for [PyPaimon](https://paimon.apache.org/docs/master/pypaimon/overview/) while also providing DataFusion integration for querying Paimon tables.
 
@@ -27,7 +27,7 @@ For DataFusion queries, use the native `SessionContext` and register a `PaimonCa
 
 ```python
 from datafusion import SessionContext
-from pypaimon_core.datafusion import PaimonCatalog
+from pypaimon_rust.datafusion import PaimonCatalog
 
 catalog = PaimonCatalog({"warehouse": "/path/to/warehouse"})
 ctx = SessionContext()

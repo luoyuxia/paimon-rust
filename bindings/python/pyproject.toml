@@ -20,7 +20,7 @@ build-backend = "maturin"
 requires = ["maturin>=1.9.4,<2.0"]
 
 [project]
-name = "pypaimon-core"
+name = "pypaimon-rust"
 readme = "project-description.md"
 requires-python = ">=3.10,<4"
 dynamic = ["version"]
@@ -40,12 +40,12 @@ classifiers = [
 ]
 
 [tool.maturin]
-module-name = "pypaimon_core.pypaimon_core_rust"
+module-name = "pypaimon_rust.pypaimon_rust"
 python-source = "python"
 include = [
     { path = "LICENSE", format = ["sdist", "wheel"] },
     { path = "NOTICE", format = ["sdist", "wheel"] },
-    { path = "python/pypaimon_core/py.typed", format = ["sdist", "wheel"] },
+    { path = "python/pypaimon_rust/py.typed", format = ["sdist", "wheel"] },
 ]
 
 [dependency-groups]

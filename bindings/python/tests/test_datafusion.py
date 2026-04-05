@@ -20,7 +20,7 @@ import os
 import pyarrow as pa
 from datafusion import SessionContext
 
-from pypaimon_core.datafusion import PaimonCatalog
+from pypaimon_rust.datafusion import PaimonCatalog
 
 WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE", "/tmp/paimon-warehouse")
 

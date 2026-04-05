@@ -16,7 +16,7 @@
 # under the License.
 
 [package]
-name = "pypaimon_core_rust"
+name = "pypaimon_rust"
 publish = false
 edition.workspace = true
 version.workspace = true

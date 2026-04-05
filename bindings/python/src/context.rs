@@ -109,6 +109,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     m.add_submodule(&this)?;
     py.import("sys")?
         .getattr("modules")?
-        .set_item("pypaimon_core.datafusion", this)?;
+        .set_item("pypaimon_rust.datafusion", this)?;
     Ok(())
 }
