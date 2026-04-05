@@ -15,11 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-.venv/
-.idea/
-__pycache__/
-.pytest_cache/
+header:
+  license:
+    spdx-id: Apache-2.0
+    copyright-owner: Apache Software Foundation
 
-*.dSYM/
-*.so
-uv.lock
+  paths-ignore:
+    - "LICENSE"
+    - "NOTICE"
+    - ".github/PULL_REQUEST_TEMPLATE.md"
+    - "crates/paimon/tests/fixtures/*.json"
+    - "**/go.sum"
+    - "bindings/python/python/pypaimon_core/py.typed"
+
+  comment: on-failure
