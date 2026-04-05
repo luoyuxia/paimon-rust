@@ -65,7 +65,6 @@ impl CatalogProvider for PaimonCatalogProvider {
         let catalog = Arc::clone(&self.catalog);
         block_on_with_runtime(
             async move { catalog.list_databases().await.unwrap_or_default() },
-            "failed to build tokio runtime for paimon catalog access",
             "paimon catalog access thread panicked",
         )
     }
@@ -84,7 +83,6 @@ impl CatalogProvider for PaimonCatalogProvider {
                     Err(_) => None,
                 }
             },
-            "failed to build tokio runtime for paimon catalog access",
             "paimon catalog access thread panicked",
         )
     }
@@ -127,7 +125,6 @@ impl SchemaProvider for PaimonSchemaProvider {
         let database = self.database.clone();
         block_on_with_runtime(
             async move { catalog.list_tables(&database).await.unwrap_or_default() },
-            "failed to build tokio runtime for paimon catalog access",
             "paimon catalog access thread panicked",
         )
     }
@@ -135,19 +132,16 @@ impl SchemaProvider for PaimonSchemaProvider {
     async fn table(&self, name: &str) -> DFResult<Option<Arc<dyn TableProvider>>> {
         let catalog = Arc::clone(&self.catalog);
         let identifier = Identifier::new(self.database.clone(), name);
-        await_with_runtime(
-            async move {
-                match catalog.get_table(&identifier).await {
-                    Ok(table) => {
-                        let provider = PaimonTableProvider::try_new(table)?;
-                        Ok(Some(Arc::new(provider) as Arc<dyn TableProvider>))
-                    }
-                    Err(paimon::Error::TableNotExist { .. }) => Ok(None),
-                    Err(e) => Err(to_datafusion_error(e)),
+        await_with_runtime(async move {
+            match catalog.get_table(&identifier).await {
+                Ok(table) => {
+                    let provider = PaimonTableProvider::try_new(table)?;
+                    Ok(Some(Arc::new(provider) as Arc<dyn TableProvider>))
                 }
-            },
-            "failed to build tokio runtime for paimon catalog access",
-        )
+                Err(paimon::Error::TableNotExist { .. }) => Ok(None),
+                Err(e) => Err(to_datafusion_error(e)),
+            }
+        })
         .await
     }
 
@@ -162,7 +156,6 @@ impl SchemaProvider for PaimonSchemaProvider {
                     Err(_) => false,
                 }
             },
-            "failed to build tokio runtime for paimon catalog access",
             "paimon catalog access thread panicked",
         )
     }

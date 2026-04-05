@@ -16,50 +16,59 @@
 // under the License.
 
 use std::future::Future;
+use std::sync::OnceLock;
 
-fn block_on_new_runtime<F>(future: F, runtime_error: &'static str) -> F::Output
-where
-    F: Future,
-{
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect(runtime_error)
-        .block_on(future)
+use tokio::runtime::{Handle, Runtime};
+
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+fn global_runtime() -> &'static Runtime {
+    RUNTIME.get_or_init(|| {
+        Runtime::new()
+            .expect("failed to build global tokio runtime for paimon datafusion integration")
+    })
+}
+
+/// Returns a [`Handle`] to the global Tokio runtime.
+///
+/// If a Tokio runtime is already entered on the current thread, its handle is
+/// returned directly. Otherwise a lazily-initialised global runtime is used.
+pub fn runtime() -> Handle {
+    match Handle::try_current() {
+        Ok(h) => h,
+        _ => global_runtime().handle().clone(),
+    }
 }
 
 // These helpers work around DataFusion FFI callbacks that may run without an
 // entered Tokio runtime. See https://github.com/apache/datafusion/issues/16312.
-// Creating a new Tokio runtime here is only a fallback for that gap; if
-// DataFusion fixes runtime propagation end-to-end, we should be able to remove
-// these manual fallback runtimes.
-pub(crate) async fn await_with_runtime<F>(future: F, runtime_error: &'static str) -> F::Output
+// A global OnceLock<Runtime> avoids creating a new runtime on every call;
+// if DataFusion fixes runtime propagation end-to-end, we should be able to
+// remove these manual fallback runtimes.
+pub(crate) async fn await_with_runtime<F>(future: F) -> F::Output
 where
     F: Future,
 {
-    if tokio::runtime::Handle::try_current().is_ok() {
+    if Handle::try_current().is_ok() {
         future.await
     } else {
-        block_on_new_runtime(future, runtime_error)
+        global_runtime().block_on(future)
     }
 }
 
 // The blocking variant is for synchronous DataFusion FFI callbacks such as
 // CatalogProvider::schema(), where we cannot `.await` directly.
-pub(crate) fn block_on_with_runtime<F>(
-    future: F,
-    runtime_error: &'static str,
-    panic_error: &'static str,
-) -> F::Output
+pub(crate) fn block_on_with_runtime<F>(future: F, panic_error: &'static str) -> F::Output
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    let run = move || block_on_new_runtime(future, runtime_error);
-
-    if tokio::runtime::Handle::try_current().is_ok() {
-        std::thread::spawn(run).join().expect(panic_error)
+    if Handle::try_current().is_ok() {
+        let handle = global_runtime().handle().clone();
+        std::thread::spawn(move || handle.block_on(future))
+            .join()
+            .expect(panic_error)
     } else {
-        run()
+        global_runtime().block_on(future)
     }
 }

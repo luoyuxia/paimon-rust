@@ -29,7 +29,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyCapsule;
 
 use crate::error::to_py_err;
-use crate::runtime::runtime;
+use paimon_datafusion::runtime::runtime;
 
 fn build_paimon_catalog_provider(
     catalog_options: HashMap<String, String>,

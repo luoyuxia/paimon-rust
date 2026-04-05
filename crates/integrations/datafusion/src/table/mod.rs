@@ -117,12 +117,9 @@ impl TableProvider for PaimonTableProvider {
         // Tokio runtime. `scan.plan()` can reach OpenDAL/Tokio filesystem calls while
         // reading Paimon metadata, so we must provide a runtime here instead of
         // assuming the caller already entered one.
-        let plan = await_with_runtime(
-            scan.plan(),
-            "failed to build tokio runtime for paimon scan planning",
-        )
-        .await
-        .map_err(to_datafusion_error)?;
+        let plan = await_with_runtime(scan.plan())
+            .await
+            .map_err(to_datafusion_error)?;
 
         // Distribute splits across DataFusion partitions, capped by the
         // session's target_partitions to avoid over-sharding with many small splits.
