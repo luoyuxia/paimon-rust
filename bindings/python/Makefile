@@ -16,7 +16,7 @@
 # under the License.
 
 build:
-	uv run maturin develop
+	uv run --no-project maturin develop
 
 install:
 	uv sync --group dev --no-install-project

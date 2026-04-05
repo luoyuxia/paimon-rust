@@ -97,7 +97,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: python-test-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('**/Cargo.lock') }}
+          key: integration-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            integration-${{ runner.os }}-
 
       - name: Start Docker containers
         run: make docker-up
