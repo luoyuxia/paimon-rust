@@ -50,7 +50,6 @@ pub struct Table {
     schema_manager: SchemaManager,
 }
 
-#[allow(dead_code)]
 impl Table {
     /// Create a new table.
     pub fn new(

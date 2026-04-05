@@ -67,7 +67,6 @@ pub struct FileSystemCatalog {
     warehouse: String,
 }
 
-#[allow(dead_code)]
 impl FileSystemCatalog {
     /// Create a new filesystem catalog from configuration options.
     ///

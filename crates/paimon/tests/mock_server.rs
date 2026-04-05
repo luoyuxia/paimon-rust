@@ -53,8 +53,7 @@ struct MockState {
 #[derive(Clone)]
 pub struct RESTServer {
     warehouse: String,
-    #[allow(dead_code)]
-    data_path: String,
+    _data_path: String,
     config: ConfigResponse,
     inner: Arc<Mutex<MockState>>,
     resource_paths: ResourcePaths,
@@ -62,11 +61,12 @@ pub struct RESTServer {
     server_handle: Option<Arc<JoinHandle<()>>>,
 }
 
+#[allow(dead_code)]
 impl RESTServer {
     /// Create a new RESTServer with initial databases.
     pub fn new(
         warehouse: String,
-        data_path: String,
+        _data_path: String,
         config: ConfigResponse,
         initial_dbs: Vec<String>,
     ) -> Self {
@@ -88,7 +88,7 @@ impl RESTServer {
             .collect();
 
         RESTServer {
-            data_path,
+            _data_path,
             config,
             warehouse,
             inner: Arc::new(Mutex::new(MockState {
@@ -521,7 +521,6 @@ impl RESTServer {
     }
     // ====================== Server Control ====================
     /// Add a database to the server state.
-    #[allow(dead_code)]
     pub fn add_database(&self, name: &str) {
         let mut s = self.inner.lock().unwrap();
         s.databases.entry(name.to_string()).or_insert_with(|| {
@@ -535,14 +534,12 @@ impl RESTServer {
         });
     }
     /// Add a no-permission database to the server state.
-    #[allow(dead_code)]
     pub fn add_no_permission_database(&self, name: &str) {
         let mut s = self.inner.lock().unwrap();
         s.no_permission_databases.insert(name.to_string());
     }
 
     /// Add a table to the server state.
-    #[allow(dead_code)]
     pub fn add_table(&self, database: &str, table: &str) {
         let mut s = self.inner.lock().unwrap();
         s.databases.entry(database.to_string()).or_insert_with(|| {
@@ -574,7 +571,6 @@ impl RESTServer {
     ///
     /// This is needed for `RESTCatalog::get_table` which requires
     /// the response to contain `schema` and `path`.
-    #[allow(dead_code)]
     pub fn add_table_with_schema(
         &self,
         database: &str,
@@ -609,7 +605,6 @@ impl RESTServer {
     }
 
     /// Add a no-permission table to the server state.
-    #[allow(dead_code)]
     pub fn add_no_permission_table(&self, database: &str, table: &str) {
         let mut s = self.inner.lock().unwrap();
         s.no_permission_tables.insert(format!("{database}.{table}"));
@@ -619,7 +614,6 @@ impl RESTServer {
         self.addr.map(|a| format!("http://{a}"))
     }
     /// Get the warehouse path.
-    #[allow(dead_code)]
     pub fn warehouse(&self) -> &str {
         &self.warehouse
     }
@@ -629,13 +623,11 @@ impl RESTServer {
         &self.resource_paths
     }
     /// Get the server address.
-    #[allow(dead_code)]
     pub fn addr(&self) -> Option<SocketAddr> {
         self.addr
     }
 
     /// Set ECS metadata role name and token for token loader testing.
-    #[allow(dead_code)]
     pub fn set_ecs_metadata(&self, role_name: &str, token: serde_json::Value) {
         let mut s = self.inner.lock().unwrap();
         s.ecs_role_name = Some(role_name.to_string());

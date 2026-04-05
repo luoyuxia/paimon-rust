@@ -14,7 +14,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-#![allow(dead_code)]
 
 use roaring::RoaringBitmap;
 use std::sync::Arc;
@@ -50,18 +49,6 @@ impl DeletionVector {
         }
     }
 
-    /// Check if a row at the given position is deleted
-    pub fn is_deleted(&self, row_position: u64) -> crate::Result<bool> {
-        // RoaringBitmap32 in Java supports up to 2^31-1, so we check i32 range
-        if row_position > i32::MAX as u64 {
-            return Err(crate::Error::UnexpectedError {
-                message: format!("The file has too many rows, RoaringBitmap32 only supports files with row count not exceeding {}.", i32::MAX),
-                source: None,
-            });
-        }
-        Ok(self.bitmap.contains(row_position as u32))
-    }
-
     /// Returns an iterator over deleted positions that supports [DeletionVectorIterator::advance_to].
     /// Required for efficient row selection building when skipping row groups (avoid re-scanning
     /// deletes in skipped ranges).
@@ -74,18 +61,14 @@ impl DeletionVector {
         DeletionVectorIterator::new(self.bitmap.iter().map(u64::from).collect())
     }
 
-    /// Get the number of deleted rows (cardinality)
-    pub fn deleted_count(&self) -> u64 {
-        self.bitmap.len()
-    }
-
     /// Check if the deletion vector is empty (no deleted rows)
     pub fn is_empty(&self) -> bool {
         self.bitmap.is_empty()
     }
 
     /// Get the underlying bitmap (read-only)
-    pub fn bitmap(&self) -> &RoaringBitmap {
+    #[cfg(test)]
+    fn bitmap(&self) -> &RoaringBitmap {
         &self.bitmap
     }
 
@@ -225,9 +208,5 @@ mod tests {
 
         let expected_bitmap = RoaringBitmap::from_iter([1u32, 2u32]);
         assert_eq!(dv.bitmap(), &expected_bitmap, "bitmap should be [1, 2]");
-        assert_eq!(dv.deleted_count(), 2);
-        assert!(dv.is_deleted(1).unwrap());
-        assert!(dv.is_deleted(2).unwrap());
-        assert!(!dv.is_deleted(0).unwrap());
     }
 }

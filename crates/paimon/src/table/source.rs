@@ -19,8 +19,6 @@
 //!
 //! Reference: [org.apache.paimon.table.source](https://github.com/apache/paimon/blob/master/paimon-core/src/main/java/org/apache/paimon/table/source/).
 
-#![allow(dead_code)]
-
 use crate::spec::{BinaryRow, DataFileMeta};
 use crate::table::table_scan::group_by_overlapping_row_id;
 use serde::{Deserialize, Serialize};

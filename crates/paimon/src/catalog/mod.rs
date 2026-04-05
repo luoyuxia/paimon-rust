@@ -35,23 +35,18 @@ pub use rest::*;
 use serde::{Deserialize, Serialize};
 
 /// Splitter for system table names (e.g. `table$snapshots`).
-#[allow(dead_code)]
 pub const SYSTEM_TABLE_SPLITTER: &str = "$";
 /// Prefix for branch in object name (e.g. `table$branch_foo`).
-#[allow(dead_code)]
 pub const SYSTEM_BRANCH_PREFIX: &str = "branch_";
 /// Default main branch name.
-#[allow(dead_code)]
 pub const DEFAULT_MAIN_BRANCH: &str = "main";
 /// Database value when the database is not known; [`Identifier::full_name`] returns only the object.
 pub const UNKNOWN_DATABASE: &str = "unknown";
 /// Database property key for custom location. Not allowed for filesystem catalog.
 /// See [Catalog.DB_LOCATION_PROP](https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/catalog/Catalog.java).
-#[allow(dead_code)] // Public API - allow unused until used by external code
 pub const DB_LOCATION_PROP: &str = "location";
 /// Suffix for database directory names in the filesystem (e.g. `mydb.db`).
 /// See [Catalog.DB_SUFFIX](https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/catalog/Catalog.java).
-#[allow(dead_code)] // Public API - allow unused until used by external code
 pub const DB_SUFFIX: &str = ".db";
 
 // ======================= Identifier ===============================
@@ -70,7 +65,6 @@ pub struct Identifier {
     object: String,
 }
 
-#[allow(dead_code)]
 impl Identifier {
     /// Create an identifier from database and object name.
     pub fn new(database: impl Into<String>, object: impl Into<String>) -> Self {
@@ -128,7 +122,6 @@ use crate::Result;
 ///
 /// Corresponds to [org.apache.paimon.catalog.Catalog](https://github.com/apache/paimon/blob/release-1.3/paimon-core/src/main/java/org/apache/paimon/catalog/Catalog.java).
 #[async_trait]
-#[allow(dead_code)]
 pub trait Catalog: Send + Sync {
     // ======================= database methods ===============================
 
