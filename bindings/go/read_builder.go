@@ -56,6 +56,25 @@ func (rb *ReadBuilder) WithProjection(columns []string) error {
 	return projFn(rb.inner, columns)
 }
 
+// WithFilter sets a filter predicate for scan planning.
+// The predicate is consumed (ownership transferred to the read builder);
+// the caller must NOT close it after this call.
+// Passing nil is a no-op.
+func (rb *ReadBuilder) WithFilter(p *Predicate) error {
+	if rb.inner == nil {
+		return ErrClosed
+	}
+	if p == nil {
+		return nil
+	}
+	filterFn := ffiReadBuilderWithFilter.symbol(rb.ctx)
+	err := filterFn(rb.inner, p.inner)
+	// Ownership transferred; prevent double-free.
+	p.inner = nil
+	p.lib.release()
+	return err
+}
+
 // NewScan creates a TableScan for planning which data files to read.
 func (rb *ReadBuilder) NewScan() (*TableScan, error) {
 	if rb.inner == nil {
@@ -129,6 +148,25 @@ var ffiReadBuilderWithProjection = newFFI(ffiOpts{
 		// Ensure Go-managed buffers stay alive for the full native call.
 		runtime.KeepAlive(cStrings)
 		runtime.KeepAlive(colPtrs)
+		if errPtr != nil {
+			return parseError(ctx, errPtr)
+		}
+		return nil
+	}
+})
+
+var ffiReadBuilderWithFilter = newFFI(ffiOpts{
+	sym:    "paimon_read_builder_with_filter",
+	rType:  &ffi.TypePointer,
+	aTypes: []*ffi.Type{&ffi.TypePointer, &ffi.TypePointer},
+}, func(ctx context.Context, ffiCall ffiCall) func(rb *paimonReadBuilder, p *paimonPredicate) error {
+	return func(rb *paimonReadBuilder, p *paimonPredicate) error {
+		var errPtr *paimonError
+		ffiCall(
+			unsafe.Pointer(&errPtr),
+			unsafe.Pointer(&rb),
+			unsafe.Pointer(&p),
+		)
 		if errPtr != nil {
 			return parseError(ctx, errPtr)
 		}
