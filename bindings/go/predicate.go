@@ -375,37 +375,24 @@ func (t *Table) buildInPredicate(
 	return &Predicate{ctx: t.ctx, lib: t.lib, inner: inner}, nil
 }
 
-// PredicateAnd combines two predicates with AND. Consumes both inputs
+// PredicateAnd combines predicates with AND. Consumes all inputs
 // (callers must NOT close them after this call).
-// Passing the same pointer for both a and b will panic.
-func PredicateAnd(a, b *Predicate) *Predicate {
-	if a == b {
-		panic("paimon: PredicateAnd called with the same predicate for both arguments")
+// Panics if fewer than 2 predicates or if any two pointers are the same.
+func PredicateAnd(predicates ...*Predicate) *Predicate {
+	if len(predicates) < 2 {
+		panic("paimon: PredicateAnd requires at least 2 predicates")
 	}
-	combineFn := ffiPredicateAnd.symbol(a.ctx)
-	inner := combineFn(a.inner, b.inner)
-	// Ownership transferred; prevent double-free.
-	a.inner = nil
-	b.inner = nil
-	// One lib ref for a was acquired, one for b; the result uses one.
-	// Release the extra.
-	b.lib.release()
-	return &Predicate{ctx: a.ctx, lib: a.lib, inner: inner}
+	return reducePreds(predicates, ffiPredicateAnd)
 }
 
-// PredicateOr combines two predicates with OR. Consumes both inputs
+// PredicateOr combines predicates with OR. Consumes all inputs
 // (callers must NOT close them after this call).
-// Passing the same pointer for both a and b will panic.
-func PredicateOr(a, b *Predicate) *Predicate {
-	if a == b {
-		panic("paimon: PredicateOr called with the same predicate for both arguments")
+// Panics if fewer than 2 predicates or if any two pointers are the same.
+func PredicateOr(predicates ...*Predicate) *Predicate {
+	if len(predicates) < 2 {
+		panic("paimon: PredicateOr requires at least 2 predicates")
 	}
-	combineFn := ffiPredicateOr.symbol(a.ctx)
-	inner := combineFn(a.inner, b.inner)
-	a.inner = nil
-	b.inner = nil
-	b.lib.release()
-	return &Predicate{ctx: a.ctx, lib: a.lib, inner: inner}
+	return reducePreds(predicates, ffiPredicateOr)
 }
 
 // PredicateNot negates a predicate. Consumes the input
@@ -415,6 +402,31 @@ func PredicateNot(p *Predicate) *Predicate {
 	inner := negateFn(p.inner)
 	p.inner = nil
 	return &Predicate{ctx: p.ctx, lib: p.lib, inner: inner}
+}
+
+// reducePreds folds predicates pairwise using the given FFI combinator.
+func reducePreds(
+	preds []*Predicate,
+	ffiVar *FFI[func(*paimonPredicate, *paimonPredicate) *paimonPredicate],
+) *Predicate {
+	// Check for duplicate pointers.
+	for i := 0; i < len(preds); i++ {
+		for j := i + 1; j < len(preds); j++ {
+			if preds[i] == preds[j] {
+				panic("paimon: combinator called with duplicate predicate pointer")
+			}
+		}
+	}
+
+	combineFn := ffiVar.symbol(preds[0].ctx)
+	result := preds[0]
+	for _, p := range preds[1:] {
+		combined := combineFn(result.inner, p.inner)
+		result.inner = combined
+		p.inner = nil
+		p.lib.release()
+	}
+	return result
 }
 
 // buildLeafPredicate is a helper for comparison predicates that take (table, column, datum).
