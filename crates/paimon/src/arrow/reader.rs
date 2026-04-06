@@ -989,44 +989,211 @@ fn build_parquet_arrow_predicate(
     field_mapping: &[Option<usize>],
     file_fields: &[DataField],
 ) -> crate::Result<Option<Box<dyn ArrowPredicate>>> {
-    let Predicate::Leaf {
-        index,
-        data_type: _,
-        op,
-        literals,
-        ..
-    } = predicate
-    else {
-        return Ok(None);
-    };
-    if !predicate_supported_for_parquet_row_filter(*op) {
-        return Ok(None);
-    }
+    match predicate {
+        Predicate::Leaf {
+            index,
+            data_type: _,
+            op,
+            literals,
+            ..
+        } => {
+            if !predicate_supported_for_parquet_row_filter(*op) {
+                return Ok(None);
+            }
+            let Some(file_index) = field_mapping.get(*index).copied().flatten() else {
+                return Ok(None);
+            };
+            let Some(file_field) = file_fields.get(file_index) else {
+                return Ok(None);
+            };
+            let Some(root_index) = parquet_root_index(parquet_schema, file_field.name()) else {
+                return Ok(None);
+            };
+            if !parquet_row_filter_literals_supported(*op, literals, file_field.data_type())? {
+                return Ok(None);
+            }
 
-    let Some(file_index) = field_mapping.get(*index).copied().flatten() else {
-        return Ok(None);
-    };
-    let Some(file_field) = file_fields.get(file_index) else {
-        return Ok(None);
-    };
-    let Some(root_index) = parquet_root_index(parquet_schema, file_field.name()) else {
-        return Ok(None);
-    };
-    if !parquet_row_filter_literals_supported(*op, literals, file_field.data_type())? {
-        return Ok(None);
+            let projection = ProjectionMask::roots(parquet_schema, [root_index]);
+            let op = *op;
+            let data_type = file_field.data_type().clone();
+            let literals = literals.to_vec();
+            Ok(Some(Box::new(ArrowPredicateFn::new(
+                projection,
+                move |batch: RecordBatch| {
+                    let Some(column) = batch.columns().first() else {
+                        return Ok(BooleanArray::new_null(batch.num_rows()));
+                    };
+                    evaluate_exact_leaf_predicate(column, &data_type, op, &literals)
+                },
+            ))))
+        }
+        Predicate::And(_) | Predicate::Or(_) | Predicate::Not(_) => {
+            build_compound_parquet_arrow_predicate(
+                parquet_schema,
+                predicate,
+                field_mapping,
+                file_fields,
+            )
+        }
+        Predicate::AlwaysTrue | Predicate::AlwaysFalse => Ok(None),
     }
+}
 
-    let projection = ProjectionMask::roots(parquet_schema, [root_index]);
-    let op = *op;
-    let data_type = file_field.data_type().clone();
-    let literals = literals.to_vec();
+/// Collect all parquet root column indices referenced by leaf predicates in
+/// a compound predicate tree. Returns `None` if any leaf is unsupported.
+fn collect_compound_root_indices(
+    predicate: &Predicate,
+    field_mapping: &[Option<usize>],
+    file_fields: &[DataField],
+    parquet_schema: &parquet::schema::types::SchemaDescriptor,
+) -> crate::Result<Option<Vec<usize>>> {
+    match predicate {
+        Predicate::Leaf {
+            index, op, literals, ..
+        } => {
+            if !predicate_supported_for_parquet_row_filter(*op) {
+                return Ok(None);
+            }
+            let Some(file_index) = field_mapping.get(*index).copied().flatten() else {
+                return Ok(None);
+            };
+            let Some(file_field) = file_fields.get(file_index) else {
+                return Ok(None);
+            };
+            let Some(root_index) = parquet_root_index(parquet_schema, file_field.name()) else {
+                return Ok(None);
+            };
+            if !parquet_row_filter_literals_supported(*op, literals, file_field.data_type())? {
+                return Ok(None);
+            }
+            Ok(Some(vec![root_index]))
+        }
+        Predicate::And(children) | Predicate::Or(children) => {
+            let mut all = Vec::new();
+            for child in children {
+                match collect_compound_root_indices(
+                    child,
+                    field_mapping,
+                    file_fields,
+                    parquet_schema,
+                )? {
+                    Some(indices) => all.extend(indices),
+                    None => return Ok(None),
+                }
+            }
+            Ok(Some(all))
+        }
+        Predicate::Not(child) => {
+            collect_compound_root_indices(child, field_mapping, file_fields, parquet_schema)
+        }
+        Predicate::AlwaysTrue | Predicate::AlwaysFalse => Ok(Some(Vec::new())),
+    }
+}
+
+/// Recursively evaluate a compound predicate tree against a projected batch.
+fn evaluate_predicate_tree(
+    batch: &RecordBatch,
+    predicate: &Predicate,
+    field_mapping: &[Option<usize>],
+    file_fields: &[DataField],
+) -> Result<BooleanArray, ArrowError> {
+    match predicate {
+        Predicate::AlwaysTrue => Ok(BooleanArray::from(vec![true; batch.num_rows()])),
+        Predicate::AlwaysFalse => Ok(BooleanArray::from(vec![false; batch.num_rows()])),
+        Predicate::Leaf {
+            index,
+            op,
+            literals,
+            ..
+        } => {
+            let file_index = field_mapping
+                .get(*index)
+                .copied()
+                .flatten()
+                .ok_or_else(|| {
+                    ArrowError::ComputeError("missing field mapping for predicate leaf".into())
+                })?;
+            let file_field = file_fields.get(file_index).ok_or_else(|| {
+                ArrowError::ComputeError("missing file field for predicate leaf".into())
+            })?;
+            let col_idx = batch.schema().index_of(file_field.name()).map_err(|e| {
+                ArrowError::ComputeError(format!(
+                    "column '{}' not found in batch: {e}",
+                    file_field.name()
+                ))
+            })?;
+            evaluate_exact_leaf_predicate(
+                batch.column(col_idx),
+                file_field.data_type(),
+                *op,
+                literals,
+            )
+        }
+        Predicate::And(children) => {
+            let mut result = BooleanArray::from(vec![true; batch.num_rows()]);
+            for child in children {
+                let child_result =
+                    evaluate_predicate_tree(batch, child, field_mapping, file_fields)?;
+                result = combine_filter_masks(&result, &child_result, false);
+            }
+            Ok(result)
+        }
+        Predicate::Or(children) => {
+            let mut result = BooleanArray::from(vec![false; batch.num_rows()]);
+            for child in children {
+                let child_result =
+                    evaluate_predicate_tree(batch, child, field_mapping, file_fields)?;
+                result = combine_filter_masks(&result, &child_result, true);
+            }
+            Ok(result)
+        }
+        Predicate::Not(child) => {
+            let child_result =
+                evaluate_predicate_tree(batch, child, field_mapping, file_fields)?;
+            // child_result is already sanitized (no nulls), safe to negate directly.
+            Ok(boolean_mask_from_predicate(child_result.len(), |i| {
+                !child_result.value(i)
+            }))
+        }
+    }
+}
+
+/// Build a single ArrowPredicate for a compound (And/Or/Not) predicate by
+/// projecting all referenced columns and evaluating the full tree.
+fn build_compound_parquet_arrow_predicate(
+    parquet_schema: &parquet::schema::types::SchemaDescriptor,
+    predicate: &Predicate,
+    field_mapping: &[Option<usize>],
+    file_fields: &[DataField],
+) -> crate::Result<Option<Box<dyn ArrowPredicate>>> {
+    let root_indices = match collect_compound_root_indices(
+        predicate,
+        field_mapping,
+        file_fields,
+        parquet_schema,
+    )? {
+        Some(indices) if !indices.is_empty() => indices,
+        _ => return Ok(None),
+    };
+
+    // Deduplicate root indices while preserving order.
+    let deduped: Vec<usize> = {
+        let mut set = std::collections::BTreeSet::new();
+        root_indices
+            .into_iter()
+            .filter(|idx| set.insert(*idx))
+            .collect()
+    };
+
+    let projection = ProjectionMask::roots(parquet_schema, deduped);
+    let predicate = predicate.clone();
+    let field_mapping = field_mapping.to_vec();
+    let file_fields = file_fields.to_vec();
+
     Ok(Some(Box::new(ArrowPredicateFn::new(
         projection,
         move |batch: RecordBatch| {
-            let Some(column) = batch.columns().first() else {
-                return Ok(BooleanArray::new_null(batch.num_rows()));
-            };
-            evaluate_exact_leaf_predicate(column, &data_type, op, &literals)
+            evaluate_predicate_tree(&batch, &predicate, &field_mapping, &file_fields)
         },
     ))))
 }

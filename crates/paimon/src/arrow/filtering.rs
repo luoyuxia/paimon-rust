@@ -54,7 +54,11 @@ fn predicate_supported_for_reader_pruning(predicate: &Predicate) -> bool {
                     | PredicateOperator::NotIn
             )
         }
-        Predicate::AlwaysTrue | Predicate::And(_) | Predicate::Or(_) | Predicate::Not(_) => false,
+        Predicate::And(children) | Predicate::Or(children) => {
+            children.iter().all(predicate_supported_for_reader_pruning)
+        }
+        Predicate::Not(child) => predicate_supported_for_reader_pruning(child),
+        Predicate::AlwaysTrue => false,
     }
 }
 
