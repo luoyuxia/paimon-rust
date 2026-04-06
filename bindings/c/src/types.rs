@@ -101,10 +101,11 @@ pub struct paimon_table_read {
     pub inner: *mut c_void,
 }
 
-/// Internal state for TableRead that stores table and projected read type.
+/// Internal state for TableRead that stores table, projected read type, and data predicates.
 pub(crate) struct TableReadState {
     pub table: Table,
     pub read_type: Vec<DataField>,
+    pub data_predicates: Vec<Predicate>,
 }
 
 #[repr(C)]
