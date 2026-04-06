@@ -247,87 +247,117 @@ func (p *Predicate) Close() {
 	})
 }
 
-// PredicateEqual creates an equality predicate: column = value.
-// The value can be any supported Go type (bool, int, int32, int64, float32,
-// float64, string) or an explicit Datum for special types like DateDatum.
-func (t *Table) PredicateEqual(column string, value any) (*Predicate, error) {
+// errConsumedPredicate is returned when a consumed or nil predicate is reused.
+var errConsumedPredicate = fmt.Errorf("paimon: predicate already consumed or nil")
+
+// PredicateBuilder creates filter predicates for a table.
+// It holds a Go-level reference to the Table and does not own any C resources,
+// so there is no Close() method.
+type PredicateBuilder struct {
+	table *Table
+}
+
+// Eq creates an equality predicate: column = value.
+func (pb *PredicateBuilder) Eq(column string, value any) (*Predicate, error) {
 	datum, err := toDatum(value)
 	if err != nil {
 		return nil, err
 	}
-	return t.buildLeafPredicate(ffiPredicateEqual, column, datum)
+	return pb.buildLeafPredicate(ffiPredicateEqual, column, datum)
 }
 
-// PredicateNotEqual creates a not-equal predicate: column != value.
-func (t *Table) PredicateNotEqual(column string, value any) (*Predicate, error) {
+// NotEq creates a not-equal predicate: column != value.
+func (pb *PredicateBuilder) NotEq(column string, value any) (*Predicate, error) {
 	datum, err := toDatum(value)
 	if err != nil {
 		return nil, err
 	}
-	return t.buildLeafPredicate(ffiPredicateNotEqual, column, datum)
+	return pb.buildLeafPredicate(ffiPredicateNotEqual, column, datum)
 }
 
-// PredicateLessThan creates a less-than predicate: column < value.
-func (t *Table) PredicateLessThan(column string, value any) (*Predicate, error) {
+// Lt creates a less-than predicate: column < value.
+func (pb *PredicateBuilder) Lt(column string, value any) (*Predicate, error) {
 	datum, err := toDatum(value)
 	if err != nil {
 		return nil, err
 	}
-	return t.buildLeafPredicate(ffiPredicateLessThan, column, datum)
+	return pb.buildLeafPredicate(ffiPredicateLessThan, column, datum)
 }
 
-// PredicateLessOrEqual creates a less-or-equal predicate: column <= value.
-func (t *Table) PredicateLessOrEqual(column string, value any) (*Predicate, error) {
+// Le creates a less-or-equal predicate: column <= value.
+func (pb *PredicateBuilder) Le(column string, value any) (*Predicate, error) {
 	datum, err := toDatum(value)
 	if err != nil {
 		return nil, err
 	}
-	return t.buildLeafPredicate(ffiPredicateLessOrEqual, column, datum)
+	return pb.buildLeafPredicate(ffiPredicateLessOrEqual, column, datum)
 }
 
-// PredicateGreaterThan creates a greater-than predicate: column > value.
-func (t *Table) PredicateGreaterThan(column string, value any) (*Predicate, error) {
+// Gt creates a greater-than predicate: column > value.
+func (pb *PredicateBuilder) Gt(column string, value any) (*Predicate, error) {
 	datum, err := toDatum(value)
 	if err != nil {
 		return nil, err
 	}
-	return t.buildLeafPredicate(ffiPredicateGreaterThan, column, datum)
+	return pb.buildLeafPredicate(ffiPredicateGreaterThan, column, datum)
 }
 
-// PredicateGreaterOrEqual creates a greater-or-equal predicate: column >= value.
-func (t *Table) PredicateGreaterOrEqual(column string, value any) (*Predicate, error) {
+// Ge creates a greater-or-equal predicate: column >= value.
+func (pb *PredicateBuilder) Ge(column string, value any) (*Predicate, error) {
 	datum, err := toDatum(value)
 	if err != nil {
 		return nil, err
 	}
-	return t.buildLeafPredicate(ffiPredicateGreaterOrEqual, column, datum)
+	return pb.buildLeafPredicate(ffiPredicateGreaterOrEqual, column, datum)
 }
 
-// PredicateIsNull creates an IS NULL predicate.
-func (t *Table) PredicateIsNull(column string) (*Predicate, error) {
-	return t.buildNullPredicate(ffiPredicateIsNull, column)
+// IsNull creates an IS NULL predicate.
+func (pb *PredicateBuilder) IsNull(column string) (*Predicate, error) {
+	return pb.buildNullPredicate(ffiPredicateIsNull, column)
 }
 
-// PredicateIsNotNull creates an IS NOT NULL predicate.
-func (t *Table) PredicateIsNotNull(column string) (*Predicate, error) {
-	return t.buildNullPredicate(ffiPredicateIsNotNull, column)
+// IsNotNull creates an IS NOT NULL predicate.
+func (pb *PredicateBuilder) IsNotNull(column string) (*Predicate, error) {
+	return pb.buildNullPredicate(ffiPredicateIsNotNull, column)
 }
 
-// PredicateIsIn creates an IN predicate: column IN (values...).
-func (t *Table) PredicateIsIn(column string, values ...any) (*Predicate, error) {
-	return t.buildInPredicate(ffiPredicateIsIn, column, values)
+// In creates an IN predicate: column IN (values...).
+func (pb *PredicateBuilder) In(column string, values ...any) (*Predicate, error) {
+	return pb.buildInPredicate(ffiPredicateIsIn, column, values)
 }
 
-// PredicateIsNotIn creates a NOT IN predicate: column NOT IN (values...).
-func (t *Table) PredicateIsNotIn(column string, values ...any) (*Predicate, error) {
-	return t.buildInPredicate(ffiPredicateIsNotIn, column, values)
+// NotIn creates a NOT IN predicate: column NOT IN (values...).
+func (pb *PredicateBuilder) NotIn(column string, values ...any) (*Predicate, error) {
+	return pb.buildInPredicate(ffiPredicateIsNotIn, column, values)
+}
+
+// buildLeafPredicate is a helper for comparison predicates that take (table, column, datum).
+func (pb *PredicateBuilder) buildLeafPredicate(
+	ffiVar *FFI[func(*paimonTable, *byte, paimonDatumC) (*paimonPredicate, error)],
+	column string, datum Datum,
+) (*Predicate, error) {
+	t := pb.table
+	if t.inner == nil {
+		return nil, ErrClosed
+	}
+	createFn := ffiVar.symbol(t.ctx)
+	cCol := append([]byte(column), 0)
+	inner, err := createFn(t.inner, &cCol[0], datum.inner)
+	runtime.KeepAlive(cCol)
+	runtime.KeepAlive(datum)
+	if err != nil {
+		return nil, err
+	}
+	t.lib.acquire()
+	return &Predicate{ctx: t.ctx, lib: t.lib, inner: inner}, nil
 }
 
 // buildNullPredicate is a helper for IS NULL / IS NOT NULL predicates.
-func (t *Table) buildNullPredicate(
+func (pb *PredicateBuilder) buildNullPredicate(
 	ffiVar *FFI[func(*paimonTable, *byte) (*paimonPredicate, error)],
 	column string,
 ) (*Predicate, error) {
+	t := pb.table
 	if t.inner == nil {
 		return nil, ErrClosed
 	}
@@ -343,10 +373,11 @@ func (t *Table) buildNullPredicate(
 }
 
 // buildInPredicate is a helper for IS IN / IS NOT IN predicates.
-func (t *Table) buildInPredicate(
+func (pb *PredicateBuilder) buildInPredicate(
 	ffiVar *FFI[func(*paimonTable, *byte, unsafe.Pointer, uintptr) (*paimonPredicate, error)],
 	column string, values []any,
 ) (*Predicate, error) {
+	t := pb.table
 	if t.inner == nil {
 		return nil, ErrClosed
 	}
@@ -375,78 +406,48 @@ func (t *Table) buildInPredicate(
 	return &Predicate{ctx: t.ctx, lib: t.lib, inner: inner}, nil
 }
 
-// PredicateAnd combines predicates with AND. Consumes all inputs
-// (callers must NOT close them after this call).
-// Panics if fewer than 2 predicates or if any two pointers are the same.
-func PredicateAnd(predicates ...*Predicate) *Predicate {
-	if len(predicates) < 2 {
-		panic("paimon: PredicateAnd requires at least 2 predicates")
-	}
-	return reducePreds(predicates, ffiPredicateAnd)
-}
-
-// PredicateOr combines predicates with OR. Consumes all inputs
-// (callers must NOT close them after this call).
-// Panics if fewer than 2 predicates or if any two pointers are the same.
-func PredicateOr(predicates ...*Predicate) *Predicate {
-	if len(predicates) < 2 {
-		panic("paimon: PredicateOr requires at least 2 predicates")
-	}
-	return reducePreds(predicates, ffiPredicateOr)
-}
-
-// PredicateNot negates a predicate. Consumes the input
-// (caller must NOT close it after this call).
-func PredicateNot(p *Predicate) *Predicate {
-	negateFn := ffiPredicateNot.symbol(p.ctx)
-	inner := negateFn(p.inner)
-	p.inner = nil
-	return &Predicate{ctx: p.ctx, lib: p.lib, inner: inner}
-}
-
-// reducePreds folds predicates pairwise using the given FFI combinator.
-func reducePreds(
-	preds []*Predicate,
+// combinePredicate is a shared helper for And/Or.
+func (p *Predicate) combinePredicate(
+	other *Predicate,
 	ffiVar *FFI[func(*paimonPredicate, *paimonPredicate) *paimonPredicate],
-) *Predicate {
-	// Check for duplicate pointers.
-	for i := 0; i < len(preds); i++ {
-		for j := i + 1; j < len(preds); j++ {
-			if preds[i] == preds[j] {
-				panic("paimon: combinator called with duplicate predicate pointer")
-			}
-		}
+) (*Predicate, error) {
+	if p == nil || p.inner == nil {
+		return nil, errConsumedPredicate
 	}
-
-	combineFn := ffiVar.symbol(preds[0].ctx)
-	result := preds[0]
-	for _, p := range preds[1:] {
-		combined := combineFn(result.inner, p.inner)
-		result.inner = combined
-		p.inner = nil
-		p.lib.release()
+	if other == nil || other.inner == nil {
+		return nil, errConsumedPredicate
 	}
-	return result
+	if p == other {
+		return nil, fmt.Errorf("paimon: cannot combine a predicate with itself")
+	}
+	combineFn := ffiVar.symbol(p.ctx)
+	p.inner = combineFn(p.inner, other.inner)
+	other.inner = nil
+	other.lib.release()
+	return p, nil
 }
 
-// buildLeafPredicate is a helper for comparison predicates that take (table, column, datum).
-func (t *Table) buildLeafPredicate(
-	ffiVar *FFI[func(*paimonTable, *byte, paimonDatumC) (*paimonPredicate, error)],
-	column string, datum Datum,
-) (*Predicate, error) {
-	if t.inner == nil {
-		return nil, ErrClosed
+// And combines this predicate with another using AND. Consumes both predicates
+// (callers must NOT close either after this call).
+func (p *Predicate) And(other *Predicate) (*Predicate, error) {
+	return p.combinePredicate(other, ffiPredicateAnd)
+}
+
+// Or combines this predicate with another using OR. Consumes both predicates
+// (callers must NOT close either after this call).
+func (p *Predicate) Or(other *Predicate) (*Predicate, error) {
+	return p.combinePredicate(other, ffiPredicateOr)
+}
+
+// Not negates this predicate. Consumes the input
+// (caller must NOT close it after this call).
+func (p *Predicate) Not() (*Predicate, error) {
+	if p == nil || p.inner == nil {
+		return nil, errConsumedPredicate
 	}
-	createFn := ffiVar.symbol(t.ctx)
-	cCol := append([]byte(column), 0)
-	inner, err := createFn(t.inner, &cCol[0], datum.inner)
-	runtime.KeepAlive(cCol)
-	runtime.KeepAlive(datum)
-	if err != nil {
-		return nil, err
-	}
-	t.lib.acquire()
-	return &Predicate{ctx: t.ctx, lib: t.lib, inner: inner}, nil
+	negateFn := ffiPredicateNot.symbol(p.ctx)
+	p.inner = negateFn(p.inner)
+	return p, nil
 }
 
 // FFI wrappers for predicate functions.

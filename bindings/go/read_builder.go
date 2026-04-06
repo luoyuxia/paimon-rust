@@ -56,7 +56,26 @@ func (rb *ReadBuilder) WithProjection(columns []string) error {
 	return projFn(rb.inner, columns)
 }
 
-// WithFilter sets a filter predicate for scan planning.
+// WithFilter sets a filter predicate for scan planning and read-side pruning.
+//
+// The predicate is used in two phases:
+//   - Scan planning: prunes partitions, buckets, and data files based on
+//     file-level statistics (min/max). This is conservative — files whose
+//     statistics are inconclusive are kept.
+//   - Read-side: applies row-level filtering via Parquet native row filters
+//     for supported leaf predicates (Eq, NotEq, Lt, Le, Gt, Ge, IsNull,
+//     IsNotNull, In, NotIn).
+//
+// Row-level filtering is exact for most common types (Bool, Int, Long, Float,
+// Double, String, Date, Decimal, Binary). However, the following cases are NOT
+// filtered at the row level and may return non-matching rows:
+//   - Compound predicates (And/Or/Not) — not yet implemented for row-level filtering.
+//   - Time, Timestamp, and LocalZonedTimestamp columns (not yet implemented).
+//   - Schema-evolution: the predicate column does not exist in older data files.
+//   - Data-evolution mode (data-evolution.enabled = true).
+//
+// In these cases callers should apply residual filtering on the returned records.
+//
 // The predicate is consumed (ownership transferred to the read builder);
 // the caller must NOT close it after this call.
 // Passing nil is a no-op.
@@ -66,6 +85,9 @@ func (rb *ReadBuilder) WithFilter(p *Predicate) error {
 	}
 	if p == nil {
 		return nil
+	}
+	if p.inner == nil {
+		return errConsumedPredicate
 	}
 	filterFn := ffiReadBuilderWithFilter.symbol(rb.ctx)
 	err := filterFn(rb.inner, p.inner)

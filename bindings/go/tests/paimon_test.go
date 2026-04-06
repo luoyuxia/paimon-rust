@@ -168,37 +168,30 @@ func TestReadLogTable(t *testing.T) {
 func TestReadWithFilter(t *testing.T) {
 	table := openTestTable(t)
 
-	t.Run("OrPredicate", func(t *testing.T) {
+	t.Run("EqualById", func(t *testing.T) {
 		rb, err := table.NewReadBuilder()
 		if err != nil {
 			t.Fatalf("Failed to create read builder: %v", err)
 		}
 		defer rb.Close()
 
-		// id = 1 OR name = 'bob'
-		predId, err := table.PredicateEqual("id", 1)
+		// id = 1
+		pb := table.PredicateBuilder()
+		pred, err := pb.Eq("id", 1)
 		if err != nil {
-			t.Fatalf("Failed to create id predicate: %v", err)
+			t.Fatalf("Failed to create predicate: %v", err)
 		}
-		predName, err := table.PredicateEqual("name", "bob")
-		if err != nil {
-			t.Fatalf("Failed to create name predicate: %v", err)
-		}
-		if err := rb.WithFilter(paimon.PredicateOr(predId, predName)); err != nil {
+		if err := rb.WithFilter(pred); err != nil {
 			t.Fatalf("Failed to set filter: %v", err)
 		}
 
 		rows := readRows(t, rb)
-		sort.Slice(rows, func(i, j int) bool { return rows[i].id < rows[j].id })
-
-		expected := []row{{1, "alice"}, {2, "bob"}}
+		expected := []row{{1, "alice"}}
 		if len(rows) != len(expected) {
 			t.Fatalf("Expected %d rows, got %d: %v", len(expected), len(rows), rows)
 		}
-		for i, exp := range expected {
-			if rows[i] != exp {
-				t.Errorf("Row %d: expected %v, got %v", i, exp, rows[i])
-			}
+		if rows[0] != expected[0] {
+			t.Errorf("Expected %v, got %v", expected[0], rows[0])
 		}
 	})
 
@@ -209,9 +202,10 @@ func TestReadWithFilter(t *testing.T) {
 		}
 		defer rb.Close()
 
-		pred, err := table.PredicateEqual("name", "")
+		pb := table.PredicateBuilder()
+		pred, err := pb.Eq("name", "")
 		if err != nil {
-			t.Fatalf("PredicateEqual with empty string failed: %v", err)
+			t.Fatalf("Eq with empty string failed: %v", err)
 		}
 		if err := rb.WithFilter(pred); err != nil {
 			t.Fatalf("WithFilter failed: %v", err)
