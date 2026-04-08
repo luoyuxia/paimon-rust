@@ -26,6 +26,7 @@ header:
     - ".github/PULL_REQUEST_TEMPLATE.md"
     - "crates/paimon/tests/**/*.json"
     - "**/go.sum"
+    - "**/DEPENDENCIES.*.tsv"
     - ".devcontainer/devcontainer.json"
     - "bindings/python/python/pypaimon_rust/py.typed"
 

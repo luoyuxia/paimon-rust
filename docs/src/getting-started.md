@@ -25,7 +25,7 @@ Add `paimon` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-paimon = "0.0.0"
+paimon = "0.1.0"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -33,7 +33,7 @@ By default, the `storage-fs` (local filesystem) and `storage-memory` (in-memory)
 
 ```toml
 [dependencies]
-paimon = { version = "0.0.0", features = ["storage-s3"] }
+paimon = { version = "0.1.0", features = ["storage-s3"] }
 ```
 
 Available storage features:

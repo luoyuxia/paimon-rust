@@ -34,4 +34,7 @@ exceptions = [
     { crate = "webpki-roots", allow = [
         "CDLA-Permissive-2.0",
     ] },
+    # The MPL license is allowed (binary-only):
+    # https://www.apache.org/legal/resolved.html#category-b
+    { allow = ["MPL-2.0"], crate = "generational-arena" },
 ]

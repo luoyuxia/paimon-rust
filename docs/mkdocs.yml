@@ -50,8 +50,11 @@ nav:
   - Getting Started: getting-started.md
   - DataFusion Integration: datafusion.md
   - Architecture: architecture.md
-  - Releases: releases.md
   - Contributing: contributing.md
+  - Releases:
+    - Releases: releases.md
+    - Creating a Release: release/creating-a-release.md
+    - Verifying a Release Candidate: release/verifying-a-release-candidate.md
 
 markdown_extensions:
   - admonition

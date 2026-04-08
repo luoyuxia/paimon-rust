@@ -25,8 +25,8 @@ under the License.
 
 ```toml
 [dependencies]
-paimon = "0.0.0"
-paimon-datafusion = "0.0.0"
+paimon = "0.1.0"
+paimon-datafusion = "0.1.0"
 datafusion = "52"
 tokio = { version = "1", features = ["full"] }
 ```
