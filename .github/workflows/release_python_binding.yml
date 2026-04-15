@@ -99,12 +99,11 @@ jobs:
               # Install cross-compilation toolchain and OpenSSL for arm64
               apt-get install -y crossbuild-essential-arm64 libssl-dev:arm64
 
-              # Symlink OpenSSL into the existing cross-compilation sysroot
+              # Copy OpenSSL into the existing cross-compilation sysroot
               # The sysroot at /usr/aarch64-unknown-linux-gnu/ already has include/ and lib/ directories
-              # So we link OpenSSL files into them instead of replacing the directories
-              ln -sf /usr/include/aarch64-linux-gnu/openssl /usr/aarch64-unknown-linux-gnu/include/openssl
-              ln -sf /usr/lib/aarch64-linux-gnu/libssl.* /usr/aarch64-unknown-linux-gnu/lib/
-              ln -sf /usr/lib/aarch64-linux-gnu/libcrypto.* /usr/aarch64-unknown-linux-gnu/lib/
+              cp -r /usr/include/aarch64-linux-gnu/openssl /usr/aarch64-unknown-linux-gnu/include/
+              cp -a /usr/lib/aarch64-linux-gnu/libssl* /usr/aarch64-unknown-linux-gnu/lib/ 2>/dev/null || true
+              cp -a /usr/lib/aarch64-linux-gnu/libcrypto* /usr/aarch64-unknown-linux-gnu/lib/ 2>/dev/null || true
             elif [ "${{ matrix.target }}" = "x86_64" ]; then
               # manylinux auto (CentOS 7) uses OpenSSL 1.0.2, install 1.1
               yum install -y openssl11-devel
