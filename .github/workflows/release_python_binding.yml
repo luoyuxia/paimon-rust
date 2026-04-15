@@ -100,13 +100,24 @@ jobs:
               apt-get install -y crossbuild-essential-arm64 libssl-dev:arm64
 
               # Copy OpenSSL into the existing cross-compilation sysroot
+              # OpenSSL headers structure:
+              # /usr/include/openssl/ - arch-independent main headers (ssl.h, crypto.h, opensslv.h, etc.)
+              # /usr/include/aarch64-linux-gnu/openssl/ - arch-specific config (configuration.h, opensslconf.h)
               echo "=== Copying OpenSSL files ==="
-              cp -v -r /usr/include/aarch64-linux-gnu/openssl /usr/aarch64-unknown-linux-gnu/include/ || echo "FAILED to copy headers: $?"
+
+              # 1. Copy main headers (arch-independent)
+              cp -v -r /usr/include/openssl /usr/aarch64-unknown-linux-gnu/include/ || echo "FAILED to copy main headers: $?"
+
+              # 2. Overwrite arch-specific config files
+              cp -v -f /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/aarch64-unknown-linux-gnu/include/openssl/ || echo "FAILED to copy configuration.h: $?"
+              cp -v -f /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/aarch64-unknown-linux-gnu/include/openssl/ || echo "FAILED to copy opensslconf.h: $?"
+
+              # 3. Copy library files
               cp -v -a /usr/lib/aarch64-linux-gnu/libssl* /usr/aarch64-unknown-linux-gnu/lib/ || echo "FAILED to copy libssl: $?"
               cp -v -a /usr/lib/aarch64-linux-gnu/libcrypto* /usr/aarch64-unknown-linux-gnu/lib/ || echo "FAILED to copy libcrypto: $?"
 
               echo "=== Verifying OpenSSL files ==="
-              ls -la /usr/aarch64-unknown-linux-gnu/include/openssl/ 2>&1 || echo "openssl dir NOT FOUND"
+              ls -la /usr/aarch64-unknown-linux-gnu/include/openssl/ | head -20
               ls /usr/aarch64-unknown-linux-gnu/lib/libssl* 2>&1 || echo "libssl NOT FOUND"
 
               echo "=== Critical check: does opensslv.h exist? ==="
