@@ -90,6 +90,10 @@ jobs:
               ln -sf /usr/lib64/pkgconfig/libssl11.pc /usr/lib64/pkgconfig/libssl.pc
               ln -sf /usr/lib64/pkgconfig/libcrypto11.pc /usr/lib64/pkgconfig/libcrypto.pc
             fi
+        env:
+          OPENSSL_DIR: ${{ matrix.target == 'aarch64' && '/usr' || '' }}
+          OPENSSL_INCLUDE_DIR: ${{ matrix.target == 'aarch64' && '/usr/include' || '' }}
+          OPENSSL_LIB_DIR: ${{ matrix.target == 'aarch64' && '/usr/lib/aarch64-linux-gnu' || '' }}
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
