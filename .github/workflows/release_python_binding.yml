@@ -96,7 +96,13 @@ jobs:
                 sed 's/^deb /deb [arch=arm64] /' >> /etc/apt/sources.list
 
               apt-get update
-              apt-get install -y libssl-dev:arm64
+              # Install cross-compilation toolchain and OpenSSL for arm64
+              apt-get install -y crossbuild-essential-arm64 libssl-dev:arm64
+
+              # Create symlink for OpenSSL headers in compiler's expected location
+              mkdir -p /usr/aarch64-unknown-linux-gnu
+              ln -sf /usr/aarch64-linux-gnu/include /usr/aarch64-unknown-linux-gnu/include
+              ln -sf /usr/aarch64-linux-gnu/lib /usr/aarch64-unknown-linux-gnu/lib
             elif [ "${{ matrix.target }}" = "x86_64" ]; then
               # manylinux auto (CentOS 7) uses OpenSSL 1.0.2, install 1.1
               yum install -y openssl11-devel
