@@ -100,28 +100,21 @@ jobs:
               apt-get install -y crossbuild-essential-arm64 libssl-dev:arm64
 
               # Copy OpenSSL into the existing cross-compilation sysroot
-              # OpenSSL headers structure:
-              # /usr/include/openssl/ - arch-independent main headers (ssl.h, crypto.h, opensslv.h, etc.)
-              # /usr/include/aarch64-linux-gnu/openssl/ - arch-specific config (configuration.h, opensslconf.h)
-              echo "=== Copying OpenSSL files ==="
-
-              # 1. Copy main headers (arch-independent)
-              cp -v -r /usr/include/openssl /usr/aarch64-unknown-linux-gnu/include/ || echo "FAILED to copy main headers: $?"
+              # 1. Copy main headers (arch-independent: ssl.h, crypto.h, opensslv.h, etc.)
+              cp -r /usr/include/openssl /usr/aarch64-unknown-linux-gnu/include/
 
               # 2. Overwrite arch-specific config files
-              cp -v -f /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/aarch64-unknown-linux-gnu/include/openssl/ || echo "FAILED to copy configuration.h: $?"
-              cp -v -f /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/aarch64-unknown-linux-gnu/include/openssl/ || echo "FAILED to copy opensslconf.h: $?"
+              cp -f /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/aarch64-unknown-linux-gnu/include/openssl/
+              cp -f /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/aarch64-unknown-linux-gnu/include/openssl/
 
               # 3. Copy library files
-              cp -v -a /usr/lib/aarch64-linux-gnu/libssl* /usr/aarch64-unknown-linux-gnu/lib/ || echo "FAILED to copy libssl: $?"
-              cp -v -a /usr/lib/aarch64-linux-gnu/libcrypto* /usr/aarch64-unknown-linux-gnu/lib/ || echo "FAILED to copy libcrypto: $?"
+              cp -a /usr/lib/aarch64-linux-gnu/libssl* /usr/aarch64-unknown-linux-gnu/lib/
+              cp -a /usr/lib/aarch64-linux-gnu/libcrypto* /usr/aarch64-unknown-linux-gnu/lib/
 
-              echo "=== Verifying OpenSSL files ==="
-              ls -la /usr/aarch64-unknown-linux-gnu/include/openssl/ | head -20
-              ls /usr/aarch64-unknown-linux-gnu/lib/libssl* 2>&1 || echo "libssl NOT FOUND"
-
-              echo "=== Critical check: does opensslv.h exist? ==="
-              [ -f /usr/aarch64-unknown-linux-gnu/include/openssl/opensslv.h ] && echo "✓ opensslv.h EXISTS" || echo "✗ opensslv.h NOT FOUND"
+              # Verify critical files exist
+              echo "OpenSSL setup: checking key files..."
+              [ -f /usr/aarch64-unknown-linux-gnu/include/openssl/opensslv.h ] && echo "✓ Headers OK" || echo "✗ Headers missing"
+              [ -f /usr/aarch64-unknown-linux-gnu/lib/libssl.so ] && echo "✓ Libraries OK" || echo "✗ Libraries missing"
             elif [ "${{ matrix.target }}" = "x86_64" ]; then
               # manylinux auto (CentOS 7) uses OpenSSL 1.0.2, install 1.1
               yum install -y openssl11-devel
