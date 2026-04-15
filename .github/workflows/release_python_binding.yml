@@ -100,9 +100,10 @@ jobs:
               apt-get install -y crossbuild-essential-arm64 libssl-dev:arm64
 
               # Create symlink for OpenSSL headers in compiler's expected location
+              # Ubuntu multi-arch puts headers in /usr/include/aarch64-linux-gnu/
               mkdir -p /usr/aarch64-unknown-linux-gnu
-              ln -sf /usr/aarch64-linux-gnu/include /usr/aarch64-unknown-linux-gnu/include
-              ln -sf /usr/aarch64-linux-gnu/lib /usr/aarch64-unknown-linux-gnu/lib
+              ln -sf /usr/include/aarch64-linux-gnu /usr/aarch64-unknown-linux-gnu/include
+              ln -sf /usr/lib/aarch64-linux-gnu /usr/aarch64-unknown-linux-gnu/lib
             elif [ "${{ matrix.target }}" = "x86_64" ]; then
               # manylinux auto (CentOS 7) uses OpenSSL 1.0.2, install 1.1
               yum install -y openssl11-devel
