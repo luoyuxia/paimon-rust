@@ -79,16 +79,22 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           before-script-linux: |
             if [ "${{ matrix.manylinux }}" = "manylinux_2_28" ]; then
-              # manylinux_2_28 uses Debian, install arm64 cross-compile OpenSSL
+              # manylinux_2_28 uses Ubuntu, install arm64 cross-compile OpenSSL
               dpkg --add-architecture arm64
-              # Configure apt sources to support multi-arch
-              if [ -f /etc/apt/sources.list ]; then
-                sed -i 's/^deb /deb [arch=amd64,arm64] /' /etc/apt/sources.list
-              fi
-              # Also update sources.list.d if present
-              if [ -d /etc/apt/sources.list.d ]; then
-                find /etc/apt/sources.list.d -name "*.list" -exec sed -i 's/^deb /deb [arch=amd64,arm64] /' {} \;
-              fi
+
+              # Ubuntu arm64 packages are on ports.ubuntu.com, not archive.ubuntu.com
+              # Backup and modify sources.list for multi-arch
+              cp /etc/apt/sources.list /etc/apt/sources.list.bak
+
+              # Mark existing sources as amd64 only
+              sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
+
+              # Add arm64 sources pointing to ports.ubuntu.com
+              grep '^deb ' /etc/apt/sources.list.bak | \
+                sed 's|archive.ubuntu.com/ubuntu|ports.ubuntu.com/ubuntu-ports|' | \
+                sed 's|security.ubuntu.com/ubuntu|ports.ubuntu.com/ubuntu-ports|' | \
+                sed 's/^deb /deb [arch=arm64] /' >> /etc/apt/sources.list
+
               apt-get update
               apt-get install -y libssl-dev:arm64
             elif [ "${{ matrix.target }}" = "x86_64" ]; then
