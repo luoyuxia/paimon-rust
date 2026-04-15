@@ -79,9 +79,18 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           before-script-linux: |
             if [ "${{ matrix.manylinux }}" = "manylinux_2_28" ]; then
-              # manylinux_2_28 uses Debian, OpenSSL should be pre-installed for cross-compile
+              # manylinux_2_28 uses Debian, install arm64 cross-compile OpenSSL
+              dpkg --add-architecture arm64
+              # Configure apt sources to support multi-arch
+              if [ -f /etc/apt/sources.list ]; then
+                sed -i 's/^deb /deb [arch=amd64,arm64] /' /etc/apt/sources.list
+              fi
+              # Also update sources.list.d if present
+              if [ -d /etc/apt/sources.list.d ]; then
+                find /etc/apt/sources.list.d -name "*.list" -exec sed -i 's/^deb /deb [arch=amd64,arm64] /' {} \;
+              fi
               apt-get update
-              apt-get install -y libssl-dev || true
+              apt-get install -y libssl-dev:arm64
             elif [ "${{ matrix.target }}" = "x86_64" ]; then
               # manylinux auto (CentOS 7) uses OpenSSL 1.0.2, install 1.1
               yum install -y openssl11-devel
