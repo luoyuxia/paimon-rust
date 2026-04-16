@@ -81,18 +81,18 @@ jobs:
             if [ "${{ matrix.target }}" = "aarch64" ]; then
               echo "Installing precompiled OpenSSL for aarch64..."
 
-              # Use Alpine Linux packages (provides static libraries)
-              ALPINE_VERSION="3.19"
+              # Use Alpine Linux 3.14 (last version with tar.gz .apk format)
+              ALPINE_VERSION="3.14"
               ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}"
               TARGET_DIR="/usr/aarch64-unknown-linux-gnu"
 
               mkdir -p /tmp/alpine-pkg && cd /tmp/alpine-pkg
 
-              # Download OpenSSL packages for aarch64
-              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-libs-static-3.1.4-r5.apk" -o openssl-libs.apk
-              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-dev-3.1.4-r5.apk" -o openssl-dev.apk
+              # Download OpenSSL packages for aarch64 (v3.14 uses tar.gz format)
+              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-libs-static-1.1.1l-r0.apk" -o openssl-libs.apk
+              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-dev-1.1.1l-r0.apk" -o openssl-dev.apk
 
-              # Extract packages (apk is just tar.gz)
+              # Extract packages (Alpine 3.14 .apk files are tar.gz)
               tar xzf openssl-libs.apk
               tar xzf openssl-dev.apk
 
