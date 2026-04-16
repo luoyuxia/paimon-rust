@@ -83,29 +83,34 @@ jobs:
           command: build
           args: --release -o dist
           before-script-linux: |
-            # Build OpenSSL for aarch64 using QEMU (native build, not cross-compile)
+            # Install precompiled OpenSSL from Debian packages
             if [ "${{ matrix.target }}" = "aarch64" ]; then
-              echo "Building OpenSSL for aarch64 (QEMU native)..."
+              set -e
+              echo "Installing OpenSSL for aarch64 from Debian packages..."
 
-              # Download and build OpenSSL
               cd /tmp
-              curl -sSL https://www.openssl.org/source/openssl-1.1.1w.tar.gz | tar xz
-              cd openssl-1.1.1w
+              # Debian Bullseye arm64 packages (OpenSSL 1.1.1)
+              DEBIAN_MIRROR="http://ftp.debian.org/debian/pool/main/o/openssl"
+              curl -sLO "${DEBIAN_MIRROR}/libssl1.1_1.1.1w-0+deb11u1_arm64.deb"
+              curl -sLO "${DEBIAN_MIRROR}/libssl-dev_1.1.1w-0+deb11u1_arm64.deb"
 
-              # Configure for native build (QEMU makes this aarch64)
-              # Use simple configuration, no cross-compile prefix needed
-              ./Configure linux-aarch64 \
-                --prefix=/usr/aarch64-unknown-linux-gnu \
-                no-shared \
-                no-tests
+              # Extract .deb packages (ar format)
+              for deb in *.deb; do
+                ar x "$deb"
+                tar xf data.tar.*
+                rm -f debian-binary control.tar.* data.tar.*
+              done
 
-              # Build and install
-              make -j$(nproc)
-              make install_sw
+              # Install to maturin's expected location
+              TARGET_DIR="/usr/aarch64-unknown-linux-gnu"
+              mkdir -p "${TARGET_DIR}"
+              cp -r usr/include/* "${TARGET_DIR}/include/" || true
+              cp -r usr/lib/aarch64-linux-gnu/* "${TARGET_DIR}/lib/" || true
 
-              echo "✓ OpenSSL built and installed"
-              ls /usr/aarch64-unknown-linux-gnu/lib/libssl.a && echo "✓ libssl.a found"
-              ls /usr/aarch64-unknown-linux-gnu/include/openssl/opensslv.h && echo "✓ opensslv.h found"
+              # Verify
+              echo "✓ OpenSSL installed"
+              ls "${TARGET_DIR}/lib/libssl.a" && echo "✓ libssl.a found"
+              ls "${TARGET_DIR}/include/openssl/opensslv.h" && echo "✓ opensslv.h found"
             fi
 
       - name: Upload wheels
