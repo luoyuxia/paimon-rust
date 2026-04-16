@@ -77,29 +77,33 @@ jobs:
           command: build
           args: --release -o dist
           before-script-linux: |
-            # Build OpenSSL from source for aarch64 cross-compilation
+            # Install precompiled OpenSSL static libraries for aarch64
             if [ "${{ matrix.target }}" = "aarch64" ]; then
-              echo "Building OpenSSL for aarch64..."
+              echo "Installing precompiled OpenSSL for aarch64..."
 
-              # Download OpenSSL 1.1.1w (last 1.1.1 version)
-              cd /tmp
-              curl -sSL https://www.openssl.org/source/openssl-1.1.1w.tar.gz | tar xz
-              cd openssl-1.1.1w
+              # Use Alpine Linux packages (provides static libraries)
+              ALPINE_VERSION="3.19"
+              ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}"
+              TARGET_DIR="/usr/aarch64-unknown-linux-gnu"
 
-              # Configure for aarch64 cross-compile (static library)
-              ./Configure linux-aarch64 \
-                --prefix=/usr/aarch64-unknown-linux-gnu \
-                --cross-compile-prefix=aarch64-linux-gnu- \
-                no-shared \
-                no-asm
+              mkdir -p /tmp/alpine-pkg && cd /tmp/alpine-pkg
 
-              # Build and install (headers and static libs only)
-              make -j$(nproc)
-              make install_sw
+              # Download OpenSSL packages for aarch64
+              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-libs-static-3.1.4-r5.apk" -o openssl-libs.apk
+              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-dev-3.1.4-r5.apk" -o openssl-dev.apk
 
-              echo "✓ OpenSSL built and installed for aarch64"
-              ls /usr/aarch64-unknown-linux-gnu/lib/libssl.a >/dev/null && echo "✓ libssl.a found"
-              ls /usr/aarch64-unknown-linux-gnu/include/openssl/opensslv.h >/dev/null && echo "✓ opensslv.h found"
+              # Extract packages (apk is just tar.gz)
+              tar xzf openssl-libs.apk
+              tar xzf openssl-dev.apk
+
+              # Install to target directory
+              mkdir -p "${TARGET_DIR}"
+              cp -r usr/* "${TARGET_DIR}/"
+
+              # Verify installation
+              echo "✓ OpenSSL installed for aarch64"
+              ls "${TARGET_DIR}/lib/libssl.a" >/dev/null && echo "✓ libssl.a found"
+              ls "${TARGET_DIR}/include/openssl/opensslv.h" >/dev/null && echo "✓ opensslv.h found"
             fi
 
       - name: Upload wheels
