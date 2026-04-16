@@ -70,6 +70,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Set up QEMU
+        if: matrix.target == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - uses: PyO3/maturin-action@v1
         with:
           working-directory: bindings/python
@@ -77,38 +83,29 @@ jobs:
           command: build
           args: --release -o dist
           before-script-linux: |
-            # Install precompiled OpenSSL static libraries for aarch64
+            # Build OpenSSL for aarch64 using QEMU (native build, not cross-compile)
             if [ "${{ matrix.target }}" = "aarch64" ]; then
-              echo "Installing precompiled OpenSSL for aarch64..."
+              echo "Building OpenSSL for aarch64 (QEMU native)..."
 
-              # Use Alpine Linux 3.14 (last version with tar.gz .apk format)
-              ALPINE_VERSION="3.14"
-              ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}"
-              TARGET_DIR="/usr/aarch64-unknown-linux-gnu"
+              # Download and build OpenSSL
+              cd /tmp
+              curl -sSL https://www.openssl.org/source/openssl-1.1.1w.tar.gz | tar xz
+              cd openssl-1.1.1w
 
-              mkdir -p /tmp/alpine-pkg && cd /tmp/alpine-pkg
+              # Configure for native build (QEMU makes this aarch64)
+              # Use simple configuration, no cross-compile prefix needed
+              ./Configure linux-aarch64 \
+                --prefix=/usr/aarch64-unknown-linux-gnu \
+                no-shared \
+                no-tests
 
-              # Download OpenSSL packages for aarch64
-              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-libs-static-1.1.1l-r0.apk" -o openssl-libs.apk
-              curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-dev-1.1.1l-r0.apk" -o openssl-dev.apk
+              # Build and install
+              make -j$(nproc)
+              make install_sw
 
-              # Extract .apk files (skip signature, extract data section)
-              # APK format: signature + control.tar.gz + data.tar.gz
-              # We only need the data section
-              for apk in openssl-libs.apk openssl-dev.apk; do
-                # Find the start of the second tar.gz (data section)
-                # Skip first gzip signature (1f 8b), find second one
-                dd if="$apk" bs=1 skip=$(grep -abo -m2 $'\x1f\x8b' "$apk" | tail -1 | cut -d: -f1) 2>/dev/null | tar xz
-              done
-
-              # Install to target directory
-              mkdir -p "${TARGET_DIR}"
-              cp -r usr/* "${TARGET_DIR}/"
-
-              # Verify installation
-              echo "✓ OpenSSL installed for aarch64"
-              ls "${TARGET_DIR}/lib/libssl.a" >/dev/null && echo "✓ libssl.a found"
-              ls "${TARGET_DIR}/include/openssl/opensslv.h" >/dev/null && echo "✓ opensslv.h found"
+              echo "✓ OpenSSL built and installed"
+              ls /usr/aarch64-unknown-linux-gnu/lib/libssl.a && echo "✓ libssl.a found"
+              ls /usr/aarch64-unknown-linux-gnu/include/openssl/opensslv.h && echo "✓ opensslv.h found"
             fi
 
       - name: Upload wheels
