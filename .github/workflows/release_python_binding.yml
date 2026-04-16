@@ -78,7 +78,16 @@ jobs:
           args: --release -o dist
           manylinux: ${{ matrix.manylinux || 'auto' }}
           before-script-linux: |
-            # Install precompiled OpenSSL from Debian packages
+            # Install OpenSSL for x86_64 (manylinux2014 with OpenSSL 1.1)
+            if [ "${{ matrix.target }}" = "x86_64" ]; then
+              yum install -y openssl11-devel
+              # Create symlinks so pkg-config finds openssl11 as openssl
+              ln -sf /usr/lib64/pkgconfig/openssl11.pc /usr/lib64/pkgconfig/openssl.pc
+              ln -sf /usr/lib64/pkgconfig/libssl11.pc /usr/lib64/pkgconfig/libssl.pc
+              ln -sf /usr/lib64/pkgconfig/libcrypto11.pc /usr/lib64/pkgconfig/libcrypto.pc
+            fi
+
+            # Install precompiled OpenSSL from Debian packages for aarch64
             if [ "${{ matrix.target }}" = "aarch64" ]; then
               set -e
               echo "Installing OpenSSL for aarch64 from Debian packages..."
