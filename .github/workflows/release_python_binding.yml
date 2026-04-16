@@ -122,6 +122,9 @@ jobs:
               ls "${TARGET_DIR}/include/openssl/opensslv.h" && echo "✓ opensslv.h found"
               ls "${TARGET_DIR}/include/openssl/opensslconf.h" && echo "✓ opensslconf.h found"
               ) # End subshell
+
+              # Fix ring crate build: define ARM architecture version for aarch64
+              export CFLAGS_aarch64_unknown_linux_gnu="-D__ARM_ARCH=8"
             fi
 
       - name: Upload wheels
