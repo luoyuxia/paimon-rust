@@ -76,9 +76,30 @@ jobs:
           target: ${{ matrix.target }}
           command: build
           args: --release -o dist
-        env:
-          # Static link OpenSSL to avoid glibc version conflicts and system differences
-          OPENSSL_STATIC: "1"
+          before-script-linux: |
+            # Install OpenSSL for aarch64 cross-compilation
+            if [ "${{ matrix.target }}" = "aarch64" ]; then
+              # manylinux uses CentOS/AlmaLinux, install OpenSSL from EPEL
+              yum install -y wget perl-core
+
+              # Download and install OpenSSL 1.1.1 for aarch64
+              cd /tmp
+              wget https://www.openssl.org/source/openssl-1.1.1w.tar.gz
+              tar xzf openssl-1.1.1w.tar.gz
+              cd openssl-1.1.1w
+
+              # Configure for aarch64 cross-compile
+              ./Configure linux-aarch64 --prefix=/usr/aarch64-unknown-linux-gnu \
+                --cross-compile-prefix=aarch64-linux-gnu- \
+                no-shared no-asm
+
+              # Build and install
+              make -j$(nproc)
+              make install_sw
+
+              echo "OpenSSL installed for aarch64"
+              ls -la /usr/aarch64-unknown-linux-gnu/include/openssl/ | head -5
+            fi
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
