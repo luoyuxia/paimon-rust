@@ -103,14 +103,24 @@ jobs:
 
               # Install to maturin's expected location
               TARGET_DIR="/usr/aarch64-unknown-linux-gnu"
-              mkdir -p "${TARGET_DIR}"
-              cp -r usr/include/* "${TARGET_DIR}/include/" || true
-              cp -r usr/lib/aarch64-linux-gnu/* "${TARGET_DIR}/lib/" || true
+              mkdir -p "${TARGET_DIR}/include/openssl" "${TARGET_DIR}/lib"
+
+              # Copy main OpenSSL headers (architecture-independent)
+              cp -r usr/include/openssl/* "${TARGET_DIR}/include/openssl/"
+
+              # Overwrite with architecture-specific headers
+              cp -f usr/include/aarch64-linux-gnu/openssl/configuration.h "${TARGET_DIR}/include/openssl/" || true
+              cp -f usr/include/aarch64-linux-gnu/openssl/opensslconf.h "${TARGET_DIR}/include/openssl/" || true
+
+              # Copy libraries
+              cp -a usr/lib/aarch64-linux-gnu/libssl* "${TARGET_DIR}/lib/"
+              cp -a usr/lib/aarch64-linux-gnu/libcrypto* "${TARGET_DIR}/lib/"
 
               # Verify
               echo "✓ OpenSSL installed"
               ls "${TARGET_DIR}/lib/libssl.a" && echo "✓ libssl.a found"
               ls "${TARGET_DIR}/include/openssl/opensslv.h" && echo "✓ opensslv.h found"
+              ls "${TARGET_DIR}/include/openssl/opensslconf.h" && echo "✓ opensslconf.h found"
               ) # End subshell
             fi
 
