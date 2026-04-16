@@ -66,7 +66,7 @@ jobs:
           - { os: macos-15-intel, target: "x86_64-apple-darwin" }
           - { os: macos-latest, target: "aarch64-apple-darwin" }
           - { os: ubuntu-latest, target: "x86_64" }
-          - { os: ubuntu-latest, target: "aarch64", manylinux: "manylinux_2_28" }
+          - { os: ubuntu-latest, target: "aarch64", manylinux: "manylinux_2_34" }
     steps:
       - uses: actions/checkout@v6
 
@@ -78,8 +78,8 @@ jobs:
           args: --release -o dist
           manylinux: ${{ matrix.manylinux || 'auto' }}
           before-script-linux: |
-            if [ "${{ matrix.manylinux }}" = "manylinux_2_28" ]; then
-              # manylinux_2_28 uses Ubuntu, install arm64 cross-compile OpenSSL
+            if [ "${{ matrix.manylinux }}" = "manylinux_2_34" ]; then
+              # manylinux_2_34 uses Ubuntu, install arm64 cross-compile OpenSSL
               dpkg --add-architecture arm64
 
               # Ubuntu arm64 packages are on ports.ubuntu.com, not archive.ubuntu.com
