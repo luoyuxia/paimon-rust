@@ -88,13 +88,18 @@ jobs:
 
               mkdir -p /tmp/alpine-pkg && cd /tmp/alpine-pkg
 
-              # Download OpenSSL packages for aarch64 (v3.14 uses tar.gz format)
+              # Download OpenSSL packages for aarch64
               curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-libs-static-1.1.1l-r0.apk" -o openssl-libs.apk
               curl -sSL "${ALPINE_MIRROR}/main/aarch64/openssl-dev-1.1.1l-r0.apk" -o openssl-dev.apk
 
-              # Extract packages (Alpine 3.14 .apk files are tar.gz)
-              tar xzf openssl-libs.apk
-              tar xzf openssl-dev.apk
+              # Extract .apk files (skip signature, extract data section)
+              # APK format: signature + control.tar.gz + data.tar.gz
+              # We only need the data section
+              for apk in openssl-libs.apk openssl-dev.apk; do
+                # Find the start of the second tar.gz (data section)
+                # Skip first gzip signature (1f 8b), find second one
+                dd if="$apk" bs=1 skip=$(grep -abo -m2 $'\x1f\x8b' "$apk" | tail -1 | cut -d: -f1) 2>/dev/null | tar xz
+              done
 
               # Install to target directory
               mkdir -p "${TARGET_DIR}"
