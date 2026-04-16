@@ -66,7 +66,7 @@ jobs:
           - { os: macos-15-intel, target: "x86_64-apple-darwin" }
           - { os: macos-latest, target: "aarch64-apple-darwin" }
           - { os: ubuntu-latest, target: "x86_64" }
-          - { os: ubuntu-latest, target: "aarch64", manylinux: "manylinux_2_34" }
+          - { os: ubuntu-latest, target: "aarch64" }
     steps:
       - uses: actions/checkout@v6
 
@@ -76,57 +76,9 @@ jobs:
           target: ${{ matrix.target }}
           command: build
           args: --release -o dist
-          manylinux: ${{ matrix.manylinux || 'auto' }}
-          before-script-linux: |
-            if [ "${{ matrix.manylinux }}" = "manylinux_2_34" ]; then
-              # manylinux_2_34 uses Ubuntu, install arm64 cross-compile OpenSSL
-              dpkg --add-architecture arm64
-
-              # Ubuntu arm64 packages are on ports.ubuntu.com, not archive.ubuntu.com
-              # Backup and modify sources.list for multi-arch
-              cp /etc/apt/sources.list /etc/apt/sources.list.bak
-
-              # Mark existing sources as amd64 only
-              sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
-
-              # Add arm64 sources pointing to ports.ubuntu.com
-              grep '^deb ' /etc/apt/sources.list.bak | \
-                sed 's|archive.ubuntu.com/ubuntu|ports.ubuntu.com/ubuntu-ports|' | \
-                sed 's|security.ubuntu.com/ubuntu|ports.ubuntu.com/ubuntu-ports|' | \
-                sed 's/^deb /deb [arch=arm64] /' >> /etc/apt/sources.list
-
-              apt-get update
-              # Install cross-compilation toolchain and OpenSSL for arm64
-              apt-get install -y crossbuild-essential-arm64 libssl-dev:arm64
-
-              # Copy OpenSSL into the existing cross-compilation sysroot
-              # 1. Copy main headers (arch-independent: ssl.h, crypto.h, opensslv.h, etc.)
-              cp -r /usr/include/openssl /usr/aarch64-unknown-linux-gnu/include/
-
-              # 2. Overwrite arch-specific config files
-              cp -f /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/aarch64-unknown-linux-gnu/include/openssl/
-              cp -f /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/aarch64-unknown-linux-gnu/include/openssl/
-
-              # 3. Copy library files
-              cp -a /usr/lib/aarch64-linux-gnu/libssl* /usr/aarch64-unknown-linux-gnu/lib/
-              cp -a /usr/lib/aarch64-linux-gnu/libcrypto* /usr/aarch64-unknown-linux-gnu/lib/
-
-              # Verify critical files exist
-              echo "OpenSSL setup: checking key files..."
-              [ -f /usr/aarch64-unknown-linux-gnu/include/openssl/opensslv.h ] && echo "✓ Headers OK" || echo "✗ Headers missing"
-              [ -f /usr/aarch64-unknown-linux-gnu/lib/libssl.so ] && echo "✓ Libraries OK" || echo "✗ Libraries missing"
-            elif [ "${{ matrix.target }}" = "x86_64" ]; then
-              # manylinux auto (CentOS 7) uses OpenSSL 1.0.2, install 1.1
-              yum install -y openssl11-devel
-              # Create symlinks for pkg-config
-              ln -sf /usr/lib64/pkgconfig/openssl11.pc /usr/lib64/pkgconfig/openssl.pc
-              ln -sf /usr/lib64/pkgconfig/libssl11.pc /usr/lib64/pkgconfig/libssl.pc
-              ln -sf /usr/lib64/pkgconfig/libcrypto11.pc /usr/lib64/pkgconfig/libcrypto.pc
-            fi
         env:
-          OPENSSL_DIR: ${{ matrix.target == 'aarch64' && '/usr' || '' }}
-          OPENSSL_INCLUDE_DIR: ${{ matrix.target == 'aarch64' && '/usr/include' || '' }}
-          OPENSSL_LIB_DIR: ${{ matrix.target == 'aarch64' && '/usr/lib/aarch64-linux-gnu' || '' }}
+          # Static link OpenSSL to avoid glibc version conflicts and system differences
+          OPENSSL_STATIC: "1"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
