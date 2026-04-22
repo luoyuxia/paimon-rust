@@ -33,164 +33,7 @@ use arrow_schema::SchemaRef;
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::StreamExt;
-use std::collections::HashMap;
 use std::sync::Arc;
-
-// ---------------------------------------------------------------------------
-// AvroValue: a serde_json::Value replacement that handles Avro bytes
-// ---------------------------------------------------------------------------
-
-/// Lightweight value type that can represent all Avro primitives including bytes.
-/// `serde_json::Value` rejects byte arrays, so we need our own.
-#[derive(Debug, Clone, PartialEq)]
-enum AvroValue {
-    Null,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    String(String),
-    Bytes(Vec<u8>),
-    /// Avro array / sequence.
-    Array(Vec<AvroValue>),
-    /// Nested record-like object.
-    Object(HashMap<String, AvroValue>),
-}
-
-impl AvroValue {
-    fn as_bool(&self) -> Option<bool> {
-        match self {
-            AvroValue::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-
-    fn as_i64(&self) -> Option<i64> {
-        match self {
-            AvroValue::Int(n) => Some(*n),
-            _ => None,
-        }
-    }
-
-    fn as_f64(&self) -> Option<f64> {
-        match self {
-            AvroValue::Float(f) => Some(*f),
-            AvroValue::Int(n) => Some(*n as f64),
-            _ => None,
-        }
-    }
-
-    fn as_str(&self) -> Option<&str> {
-        match self {
-            AvroValue::String(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    fn as_bytes(&self) -> Option<&[u8]> {
-        match self {
-            AvroValue::Bytes(b) => Some(b),
-            AvroValue::String(s) => Some(s.as_bytes()),
-            _ => None,
-        }
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for AvroValue {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct AvroValueVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for AvroValueVisitor {
-            type Value = AvroValue;
-
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("any Avro value")
-            }
-
-            fn visit_bool<E>(self, v: bool) -> Result<AvroValue, E> {
-                Ok(AvroValue::Bool(v))
-            }
-
-            fn visit_i8<E>(self, v: i8) -> Result<AvroValue, E> {
-                Ok(AvroValue::Int(v as i64))
-            }
-
-            fn visit_i16<E>(self, v: i16) -> Result<AvroValue, E> {
-                Ok(AvroValue::Int(v as i64))
-            }
-
-            fn visit_i32<E>(self, v: i32) -> Result<AvroValue, E> {
-                Ok(AvroValue::Int(v as i64))
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<AvroValue, E> {
-                Ok(AvroValue::Int(v))
-            }
-
-            fn visit_u64<E>(self, v: u64) -> Result<AvroValue, E> {
-                Ok(AvroValue::Int(v as i64))
-            }
-
-            fn visit_f32<E>(self, v: f32) -> Result<AvroValue, E> {
-                Ok(AvroValue::Float(v as f64))
-            }
-
-            fn visit_f64<E>(self, v: f64) -> Result<AvroValue, E> {
-                Ok(AvroValue::Float(v))
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<AvroValue, E> {
-                Ok(AvroValue::String(v.to_owned()))
-            }
-
-            fn visit_string<E>(self, v: String) -> Result<AvroValue, E> {
-                Ok(AvroValue::String(v))
-            }
-
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<AvroValue, E> {
-                Ok(AvroValue::Bytes(v.to_vec()))
-            }
-
-            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<AvroValue, E> {
-                Ok(AvroValue::Bytes(v))
-            }
-
-            fn visit_none<E>(self) -> Result<AvroValue, E> {
-                Ok(AvroValue::Null)
-            }
-
-            fn visit_unit<E>(self) -> Result<AvroValue, E> {
-                Ok(AvroValue::Null)
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<AvroValue, A::Error>
-            where
-                A: serde::de::MapAccess<'de>,
-            {
-                let mut m = HashMap::new();
-                while let Some((k, v)) = map.next_entry::<String, AvroValue>()? {
-                    m.insert(k, v);
-                }
-                Ok(AvroValue::Object(m))
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<AvroValue, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let mut v = Vec::new();
-                while let Some(elem) = seq.next_element::<AvroValue>()? {
-                    v.push(elem);
-                }
-                Ok(AvroValue::Array(v))
-            }
-        }
-
-        deserializer.deserialize_any(AvroValueVisitor)
-    }
-}
 
 pub(crate) struct AvroFormatReader;
 
@@ -215,20 +58,20 @@ impl FormatFileReader for AvroFormatReader {
         let target_schema = build_target_arrow_schema(&read_fields)?;
         let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
 
-        let mut all_records: Vec<HashMap<String, AvroValue>> = Vec::new();
-        for result in Reader::new(&file_bytes[..]).map_err(|e| Error::UnexpectedError {
-            message: format!("Failed to open Avro file: {e}"),
-            source: Some(Box::new(e)),
-        })? {
-            let record = result.map_err(|e| Error::UnexpectedError {
+        // Collect Avro records directly as apache_avro::Value, avoiding intermediate conversion.
+        let all_records: Vec<Value> = Reader::new(&file_bytes[..])
+            .map_err(|e| Error::UnexpectedError {
+                message: format!("Failed to open Avro file: {e}"),
+                source: Some(Box::new(e)),
+            })?
+            .collect::<std::result::Result<Vec<Value>, _>>()
+            .map_err(|e| Error::UnexpectedError {
                 message: format!("Failed to deserialize Avro record: {e}"),
                 source: Some(Box::new(e)),
             })?;
-            all_records.push(avro_record_to_hash_map(record)?);
-        }
 
         // Apply row selection filtering.
-        let records: Vec<HashMap<String, AvroValue>> = match row_selection {
+        let records: Vec<Value> = match row_selection {
             Some(ref ranges) => {
                 let total_rows = all_records.len();
                 let mask = ranges_to_mask(total_rows, ranges);
@@ -252,62 +95,90 @@ impl FormatFileReader for AvroFormatReader {
     }
 }
 
-fn avro_record_to_hash_map(value: Value) -> crate::Result<HashMap<String, AvroValue>> {
-    match value {
-        Value::Record(fields) => Ok(fields
-            .into_iter()
-            .map(|(name, value)| Ok((name, avro_value_from_value(value)?)))
-            .collect::<crate::Result<HashMap<_, _>>>()?),
-        other => Err(Error::UnexpectedError {
-            message: format!("Expected Avro record, got {other:?}"),
-            source: None,
-        }),
+// ---------------------------------------------------------------------------
+// Value access helpers — work directly with apache_avro::types::Value
+// ---------------------------------------------------------------------------
+
+/// Find the position of a named field from the first record.
+/// All records in an Avro file share the same schema, so the index is valid
+/// for every record.
+fn field_index(records: &[Value], name: &str) -> Option<usize> {
+    match records.first() {
+        Some(Value::Record(fields)) => fields.iter().position(|(n, _)| n == name),
+        _ => None,
     }
 }
 
-fn avro_value_from_value(value: Value) -> crate::Result<AvroValue> {
-    match value {
-        Value::Null => Ok(AvroValue::Null),
-        Value::Boolean(v) => Ok(AvroValue::Bool(v)),
-        Value::Int(v) => Ok(AvroValue::Int(i64::from(v))),
-        Value::Long(v) => Ok(AvroValue::Int(v)),
-        Value::Float(v) => Ok(AvroValue::Float(f64::from(v))),
-        Value::Double(v) => Ok(AvroValue::Float(v)),
-        Value::Bytes(v) => Ok(AvroValue::Bytes(v)),
-        Value::String(v) => Ok(AvroValue::String(v)),
-        Value::Fixed(_, v) => Ok(AvroValue::Bytes(v)),
-        Value::Enum(_, v) => Ok(AvroValue::String(v)),
-        Value::Union(_, v) => avro_value_from_value(*v),
-        Value::Array(values) => values
-            .into_iter()
-            .map(avro_value_from_value)
-            .collect::<crate::Result<Vec<_>>>()
-            .map(AvroValue::Array),
-        Value::Map(values) => values
-            .into_iter()
-            .map(|(name, value)| Ok((name, avro_value_from_value(value)?)))
-            .collect::<crate::Result<HashMap<_, _>>>()
-            .map(AvroValue::Object),
-        Value::Record(fields) => fields
-            .into_iter()
-            .map(|(name, value)| Ok((name, avro_value_from_value(value)?)))
-            .collect::<crate::Result<HashMap<_, _>>>()
-            .map(AvroValue::Object),
-        Value::Date(v) => Ok(AvroValue::Int(i64::from(v))),
-        Value::Decimal(v) => Vec::<u8>::try_from(v)
-            .map(AvroValue::Bytes)
-            .map_err(crate::Error::from),
-        Value::BigDecimal(v) => Ok(AvroValue::String(v.to_string())),
-        Value::TimeMillis(v) => Ok(AvroValue::Int(i64::from(v))),
-        Value::TimeMicros(v) => Ok(AvroValue::Int(v)),
-        Value::TimestampMillis(v) => Ok(AvroValue::Int(v)),
-        Value::TimestampMicros(v) => Ok(AvroValue::Int(v)),
-        Value::TimestampNanos(v) => Ok(AvroValue::Int(v)),
-        Value::LocalTimestampMillis(v) => Ok(AvroValue::Int(v)),
-        Value::LocalTimestampMicros(v) => Ok(AvroValue::Int(v)),
-        Value::LocalTimestampNanos(v) => Ok(AvroValue::Int(v)),
-        Value::Duration(v) => Ok(AvroValue::Bytes(<[u8; 12]>::from(v).to_vec())),
-        Value::Uuid(v) => Ok(AvroValue::String(v.to_string())),
+/// Look up a field by cached index with name-based fallback, unwrapping unions.
+fn get_field_at<'a>(record: &'a Value, name: &str, idx: Option<usize>) -> Option<&'a Value> {
+    match record {
+        Value::Record(fields) => {
+            if let Some(i) = idx {
+                fields.get(i).map(|(_, v)| v)
+            } else {
+                fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+            }
+            .and_then(unwrap_value)
+        }
+        _ => None,
+    }
+}
+
+/// Unwrap Avro union/null values, returning `None` for null.
+fn unwrap_value(v: &Value) -> Option<&Value> {
+    match v {
+        Value::Null => None,
+        Value::Union(_, inner) => unwrap_value(inner),
+        other => Some(other),
+    }
+}
+
+fn value_as_bool(v: &Value) -> Option<bool> {
+    match v {
+        Value::Boolean(b) => Some(*b),
+        _ => None,
+    }
+}
+
+fn value_as_i64(v: &Value) -> Option<i64> {
+    match v {
+        Value::Int(n) => Some(i64::from(*n)),
+        Value::Long(n) => Some(*n),
+        Value::Date(n) | Value::TimeMillis(n) => Some(i64::from(*n)),
+        Value::TimeMicros(n)
+        | Value::TimestampMillis(n)
+        | Value::TimestampMicros(n)
+        | Value::TimestampNanos(n)
+        | Value::LocalTimestampMillis(n)
+        | Value::LocalTimestampMicros(n)
+        | Value::LocalTimestampNanos(n) => Some(*n),
+        _ => None,
+    }
+}
+
+fn value_as_f64(v: &Value) -> Option<f64> {
+    match v {
+        Value::Float(f) => Some(f64::from(*f)),
+        Value::Double(f) => Some(*f),
+        Value::Int(n) => Some(f64::from(*n)),
+        Value::Long(n) => Some(*n as f64),
+        _ => None,
+    }
+}
+
+fn value_as_str(v: &Value) -> Option<&str> {
+    match v {
+        Value::String(s) => Some(s),
+        Value::Enum(_, s) => Some(s),
+        _ => None,
+    }
+}
+
+fn value_as_bytes(v: &Value) -> Option<&[u8]> {
+    match v {
+        Value::Bytes(b) | Value::Fixed(_, b) => Some(b),
+        Value::String(s) => Some(s.as_bytes()),
+        _ => None,
     }
 }
 
@@ -336,7 +207,7 @@ fn ranges_to_mask(total_rows: usize, ranges: &[RowRange]) -> Vec<bool> {
 // ---------------------------------------------------------------------------
 
 fn records_to_batch(
-    records: &[HashMap<String, AvroValue>],
+    records: &[Value],
     fields: &[DataField],
     schema: &SchemaRef,
 ) -> crate::Result<RecordBatch> {
@@ -364,23 +235,26 @@ fn records_to_batch(
 }
 
 fn build_column(
-    records: &[HashMap<String, AvroValue>],
+    records: &[Value],
     name: &str,
     data_type: &DataType,
     num_rows: usize,
 ) -> crate::Result<Arc<dyn arrow_array::Array>> {
+    // Pre-compute field position once; O(1) per-row access thereafter.
+    let idx = field_index(records, name);
+
     Ok(match data_type {
         DataType::Boolean(_) => {
             let arr: BooleanArray = (0..num_rows)
-                .map(|i| get_field(&records[i], name).and_then(|v| v.as_bool()))
+                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_bool))
                 .collect();
             Arc::new(arr)
         }
         DataType::TinyInt(_) => {
             let arr: Int8Array = (0..num_rows)
                 .map(|i| {
-                    get_field(&records[i], name)
-                        .and_then(|v| v.as_i64())
+                    get_field_at(&records[i], name, idx)
+                        .and_then(value_as_i64)
                         .map(|v| v as i8)
                 })
                 .collect();
@@ -389,8 +263,8 @@ fn build_column(
         DataType::SmallInt(_) => {
             let arr: Int16Array = (0..num_rows)
                 .map(|i| {
-                    get_field(&records[i], name)
-                        .and_then(|v| v.as_i64())
+                    get_field_at(&records[i], name, idx)
+                        .and_then(value_as_i64)
                         .map(|v| v as i16)
                 })
                 .collect();
@@ -399,8 +273,8 @@ fn build_column(
         DataType::Int(_) => {
             let arr: Int32Array = (0..num_rows)
                 .map(|i| {
-                    get_field(&records[i], name)
-                        .and_then(|v| v.as_i64())
+                    get_field_at(&records[i], name, idx)
+                        .and_then(value_as_i64)
                         .map(|v| v as i32)
                 })
                 .collect();
@@ -408,15 +282,15 @@ fn build_column(
         }
         DataType::BigInt(_) => {
             let arr: Int64Array = (0..num_rows)
-                .map(|i| get_field(&records[i], name).and_then(|v| v.as_i64()))
+                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_i64))
                 .collect();
             Arc::new(arr)
         }
         DataType::Float(_) => {
             let arr: Float32Array = (0..num_rows)
                 .map(|i| {
-                    get_field(&records[i], name)
-                        .and_then(|v| v.as_f64())
+                    get_field_at(&records[i], name, idx)
+                        .and_then(value_as_f64)
                         .map(|v| v as f32)
                 })
                 .collect();
@@ -424,19 +298,19 @@ fn build_column(
         }
         DataType::Double(_) => {
             let arr: Float64Array = (0..num_rows)
-                .map(|i| get_field(&records[i], name).and_then(|v| v.as_f64()))
+                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_f64))
                 .collect();
             Arc::new(arr)
         }
         DataType::Char(_) | DataType::VarChar(_) => {
             let arr: StringArray = (0..num_rows)
-                .map(|i| get_field(&records[i], name).and_then(|v| v.as_str()))
+                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_str))
                 .collect();
             Arc::new(arr)
         }
         DataType::Binary(_) | DataType::VarBinary(_) => {
             let values: Vec<Option<&[u8]>> = (0..num_rows)
-                .map(|i| get_field(&records[i], name).and_then(|v| v.as_bytes()))
+                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_bytes))
                 .collect();
             let arr: BinaryArray = values.into_iter().collect();
             Arc::new(arr)
@@ -444,8 +318,8 @@ fn build_column(
         DataType::Date(_) => {
             let arr: Date32Array = (0..num_rows)
                 .map(|i| {
-                    get_field(&records[i], name)
-                        .and_then(|v| v.as_i64())
+                    get_field_at(&records[i], name, idx)
+                        .and_then(value_as_i64)
                         .map(|v| v as i32)
                 })
                 .collect();
@@ -460,12 +334,16 @@ fn build_column(
             })?;
             let arr: Decimal128Array = (0..num_rows)
                 .map(|i| {
-                    get_field(&records[i], name).and_then(|v| match v {
+                    get_field_at(&records[i], name, idx).and_then(|v| match v {
                         // Avro decimal is encoded as big-endian two's complement bytes.
-                        AvroValue::Bytes(b) => Some(bytes_to_i128_be(b)),
-                        AvroValue::Int(n) => Some(*n as i128),
-                        // serde_avro_fast may deserialize decimal as string representation.
-                        AvroValue::String(s) => parse_decimal_string(s, scale),
+                        Value::Bytes(b) | Value::Fixed(_, b) => Some(bytes_to_i128_be(b)),
+                        Value::Int(n) => Some(i64::from(*n) as i128),
+                        Value::Long(n) => Some(*n as i128),
+                        Value::Decimal(d) => Vec::<u8>::try_from(d.clone())
+                            .ok()
+                            .map(|b| bytes_to_i128_be(&b)),
+                        Value::BigDecimal(bd) => parse_decimal_string(&bd.to_string(), scale),
+                        Value::String(s) => parse_decimal_string(s, scale),
                         _ => None,
                     })
                 })
@@ -501,14 +379,15 @@ fn build_column(
 }
 
 fn build_timestamp_column(
-    records: &[HashMap<String, AvroValue>],
+    records: &[Value],
     name: &str,
     num_rows: usize,
     precision: u32,
     tz: Option<Arc<str>>,
 ) -> Arc<dyn arrow_array::Array> {
+    let idx = field_index(records, name);
     let values: Vec<Option<i64>> = (0..num_rows)
-        .map(|i| get_field(&records[i], name).and_then(|v| v.as_i64()))
+        .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_i64))
         .collect();
     match precision {
         0..=3 => Arc::new(TimestampMillisecondArray::from(values).with_timezone_opt(tz)),
@@ -518,7 +397,7 @@ fn build_timestamp_column(
 }
 
 fn build_array_column(
-    records: &[HashMap<String, AvroValue>],
+    records: &[Value],
     name: &str,
     element_type: &DataType,
     num_rows: usize,
@@ -527,16 +406,16 @@ fn build_array_column(
     let arrow_element_field =
         arrow_schema::Field::new("element", arrow_element_type, element_type.is_nullable());
 
+    let idx = field_index(records, name);
     let mut offsets = vec![0i32];
-    let mut element_records: Vec<HashMap<String, AvroValue>> = Vec::new();
+    let mut element_records: Vec<Value> = Vec::new();
 
     for record in records.iter().take(num_rows) {
-        match get_field(record, name) {
-            Some(AvroValue::Array(arr)) => {
+        match get_field_at(record, name, idx) {
+            Some(Value::Array(arr)) => {
                 for elem in arr {
-                    let mut m = HashMap::new();
-                    m.insert("element".to_string(), elem.clone());
-                    element_records.push(m);
+                    element_records
+                        .push(Value::Record(vec![("element".to_string(), elem.clone())]));
                 }
                 offsets.push(offsets.last().unwrap() + arr.len() as i32);
             }
@@ -556,7 +435,7 @@ fn build_array_column(
     let offsets_buf = OffsetBuffer::new(ScalarBuffer::from(offsets));
     let nulls = NullBuffer::new(BooleanBuffer::from(
         (0..num_rows)
-            .map(|i| get_field(&records[i], name).is_some())
+            .map(|i| get_field_at(&records[i], name, idx).is_some())
             .collect::<Vec<_>>(),
     ));
 
@@ -574,7 +453,7 @@ fn build_array_column(
 }
 
 fn build_map_column(
-    records: &[HashMap<String, AvroValue>],
+    records: &[Value],
     name: &str,
     map_type: &MapType,
     num_rows: usize,
@@ -582,20 +461,20 @@ fn build_map_column(
     let arrow_key_type = crate::arrow::paimon_type_to_arrow(map_type.key_type())?;
     let arrow_value_type = crate::arrow::paimon_type_to_arrow(map_type.value_type())?;
 
+    let idx = field_index(records, name);
     let mut offsets = vec![0i32];
-    let mut key_records: Vec<HashMap<String, AvroValue>> = Vec::new();
-    let mut value_records: Vec<HashMap<String, AvroValue>> = Vec::new();
+    let mut key_records: Vec<Value> = Vec::new();
+    let mut value_records: Vec<Value> = Vec::new();
 
     for record in records.iter().take(num_rows) {
-        match get_field_raw(record, name) {
-            Some(AvroValue::Object(map)) => {
+        match get_field_at(record, name, idx) {
+            Some(Value::Map(map)) => {
                 for (k, v) in map {
-                    let mut km = HashMap::new();
-                    km.insert("key".to_string(), AvroValue::String(k.clone()));
-                    key_records.push(km);
-                    let mut vm = HashMap::new();
-                    vm.insert("value".to_string(), v.clone());
-                    value_records.push(vm);
+                    key_records.push(Value::Record(vec![(
+                        "key".to_string(),
+                        Value::String(k.clone()),
+                    )]));
+                    value_records.push(Value::Record(vec![("value".to_string(), v.clone())]));
                 }
                 offsets.push(offsets.last().unwrap() + map.len() as i32);
             }
@@ -640,7 +519,7 @@ fn build_map_column(
     let offsets_buf = OffsetBuffer::new(ScalarBuffer::from(offsets));
     let nulls = NullBuffer::new(BooleanBuffer::from(
         (0..num_rows)
-            .map(|i| get_field_raw(&records[i], name).is_some())
+            .map(|i| get_field_at(&records[i], name, idx).is_some())
             .collect::<Vec<_>>(),
     ));
 
@@ -659,15 +538,16 @@ fn build_map_column(
 }
 
 fn build_row_column(
-    records: &[HashMap<String, AvroValue>],
+    records: &[Value],
     name: &str,
     row_type: &RowType,
     num_rows: usize,
 ) -> crate::Result<Arc<dyn arrow_array::Array>> {
-    let sub_records: Vec<HashMap<String, AvroValue>> = (0..num_rows)
-        .map(|i| match get_field_raw(&records[i], name) {
-            Some(AvroValue::Object(obj)) => obj.clone(),
-            _ => HashMap::new(),
+    let idx = field_index(records, name);
+    let sub_records: Vec<Value> = (0..num_rows)
+        .map(|i| match get_field_at(&records[i], name, idx) {
+            Some(v @ Value::Record(_)) => v.clone(),
+            _ => Value::Record(vec![]),
         })
         .collect();
 
@@ -687,7 +567,7 @@ fn build_row_column(
 
     let nulls = NullBuffer::new(BooleanBuffer::from(
         (0..num_rows)
-            .map(|i| get_field_raw(&records[i], name).is_some())
+            .map(|i| get_field_at(&records[i], name, idx).is_some())
             .collect::<Vec<_>>(),
     ));
 
@@ -735,36 +615,6 @@ fn bytes_to_i128_be(bytes: &[u8]) -> i128 {
     i128::from_be_bytes(buf)
 }
 
-/// Look up a field in an Avro record, unwrapping union encoding.
-fn get_field<'a>(record: &'a HashMap<String, AvroValue>, name: &str) -> Option<&'a AvroValue> {
-    record.get(name).and_then(unwrap_avro_union)
-}
-
-/// Look up a field without union unwrapping — for Map/Row types whose Object
-/// shape overlaps with union wrappers.
-fn get_field_raw<'a>(record: &'a HashMap<String, AvroValue>, name: &str) -> Option<&'a AvroValue> {
-    record.get(name).and_then(|v| match v {
-        AvroValue::Null => None,
-        other => Some(other),
-    })
-}
-
-/// Unwrap Avro union encoding: `{"type": value}` → `value`, or `"null"` → `None`.
-fn unwrap_avro_union(v: &AvroValue) -> Option<&AvroValue> {
-    match v {
-        AvroValue::Null => None,
-        AvroValue::Object(map) if map.len() == 1 => {
-            let (key, inner) = map.iter().next().unwrap();
-            if key == "null" {
-                None
-            } else {
-                Some(inner)
-            }
-        }
-        other => Some(other),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,78 +624,95 @@ mod tests {
     };
     use arrow_array::Array;
 
-    // Helper to build AvroValue variants concisely in tests.
-    fn av_int(v: i64) -> AvroValue {
-        AvroValue::Int(v)
+    // Helper to build Value variants concisely in tests.
+    fn av_int(v: i64) -> Value {
+        Value::Long(v)
     }
-    fn av_float(v: f64) -> AvroValue {
-        AvroValue::Float(v)
+    fn av_float(v: f64) -> Value {
+        Value::Double(v)
     }
-    fn av_bool(v: bool) -> AvroValue {
-        AvroValue::Bool(v)
+    fn av_bool(v: bool) -> Value {
+        Value::Boolean(v)
     }
-    fn av_str(v: &str) -> AvroValue {
-        AvroValue::String(v.to_string())
+    fn av_str(v: &str) -> Value {
+        Value::String(v.to_string())
     }
-    fn av_bytes(v: &[u8]) -> AvroValue {
-        AvroValue::Bytes(v.to_vec())
+    fn av_bytes(v: &[u8]) -> Value {
+        Value::Bytes(v.to_vec())
     }
-    fn av_null() -> AvroValue {
-        AvroValue::Null
+    fn av_null() -> Value {
+        Value::Null
     }
-    fn av_union(key: &str, val: AvroValue) -> AvroValue {
-        AvroValue::Object(HashMap::from([(key.to_string(), val)]))
+    fn av_union(val: Value) -> Value {
+        Value::Union(1, Box::new(val))
     }
 
     // -----------------------------------------------------------------------
-    // unwrap_avro_union
+    // unwrap_value
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_unwrap_avro_union_null() {
-        assert!(unwrap_avro_union(&av_null()).is_none());
+    fn test_unwrap_value_null() {
+        assert!(unwrap_value(&av_null()).is_none());
     }
 
     #[test]
-    fn test_unwrap_avro_union_plain_value() {
+    fn test_unwrap_value_plain() {
         let v = av_int(42);
-        assert_eq!(unwrap_avro_union(&v), Some(&av_int(42)));
+        assert_eq!(unwrap_value(&v), Some(&Value::Long(42)));
     }
 
     #[test]
-    fn test_unwrap_avro_union_wrapped_value() {
-        let v = av_union("int", av_int(42));
-        assert_eq!(unwrap_avro_union(&v), Some(&av_int(42)));
+    fn test_unwrap_value_union() {
+        let v = av_union(av_int(42));
+        assert_eq!(unwrap_value(&v), Some(&Value::Long(42)));
     }
 
     #[test]
-    fn test_unwrap_avro_union_null_key() {
-        let v = av_union("null", av_null());
-        assert!(unwrap_avro_union(&v).is_none());
+    fn test_unwrap_value_union_null() {
+        let v = Value::Union(0, Box::new(Value::Null));
+        assert!(unwrap_value(&v).is_none());
     }
 
     // -----------------------------------------------------------------------
-    // get_field
+    // get_field_at
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn test_get_field_present() {
-        let mut record = HashMap::new();
-        record.insert("name".to_string(), av_str("alice"));
-        assert_eq!(get_field(&record, "name"), Some(&av_str("alice")));
+    fn make_record(fields: Vec<(&str, Value)>) -> Value {
+        Value::Record(
+            fields
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+        )
     }
 
     #[test]
-    fn test_get_field_missing() {
-        let record: HashMap<String, AvroValue> = HashMap::new();
-        assert!(get_field(&record, "name").is_none());
+    fn test_get_field_at_present() {
+        let record = make_record(vec![("name", av_str("alice"))]);
+        assert_eq!(
+            get_field_at(&record, "name", Some(0)),
+            Some(&Value::String("alice".to_string()))
+        );
     }
 
     #[test]
-    fn test_get_field_union_wrapped() {
-        let mut record = HashMap::new();
-        record.insert("age".to_string(), av_union("int", av_int(30)));
-        assert_eq!(get_field(&record, "age"), Some(&av_int(30)));
+    fn test_get_field_at_missing() {
+        let record = make_record(vec![]);
+        assert!(get_field_at(&record, "name", None).is_none());
+    }
+
+    #[test]
+    fn test_get_field_at_union_wrapped() {
+        let record = make_record(vec![("age", av_union(av_int(30)))]);
+        assert_eq!(get_field_at(&record, "age", Some(0)), Some(&Value::Long(30)));
+    }
+
+    #[test]
+    fn test_get_field_at_fallback() {
+        let record = make_record(vec![("x", av_int(1)), ("y", av_int(2))]);
+        // No cached index — falls back to linear search.
+        assert_eq!(get_field_at(&record, "y", None), Some(&Value::Long(2)));
     }
 
     // -----------------------------------------------------------------------
@@ -877,13 +744,15 @@ mod tests {
     // build_column + records_to_batch
     // -----------------------------------------------------------------------
 
-    fn make_records(rows: Vec<Vec<(&str, AvroValue)>>) -> Vec<HashMap<String, AvroValue>> {
+    fn make_records(rows: Vec<Vec<(&str, Value)>>) -> Vec<Value> {
         rows.into_iter()
             .map(|fields| {
-                fields
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect()
+                Value::Record(
+                    fields
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), v))
+                        .collect(),
+                )
             })
             .collect()
     }
@@ -1050,7 +919,7 @@ mod tests {
             DataType::Int(IntType::new()),
         )];
         let schema = crate::arrow::build_target_arrow_schema(&fields).unwrap();
-        let records: Vec<HashMap<String, AvroValue>> = vec![];
+        let records: Vec<Value> = vec![];
         let batch = records_to_batch(&records, &fields, &schema).unwrap();
         assert_eq!(batch.num_rows(), 0);
     }
