@@ -21,6 +21,8 @@ use crate::io::FileRead;
 use crate::spec::{DataField, DataType, MapType, RowType};
 use crate::table::{ArrowRecordBatchStream, RowRange};
 use crate::Error;
+use apache_avro::types::Value;
+use apache_avro::Reader;
 use arrow_array::{
     BinaryArray, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array,
     Int16Array, Int32Array, Int64Array, Int8Array, ListArray, MapArray, RecordBatch, StringArray,
@@ -50,7 +52,7 @@ enum AvroValue {
     Bytes(Vec<u8>),
     /// Avro array / sequence.
     Array(Vec<AvroValue>),
-    /// Union wrapper or record: `{"type": value}` produced by serde_avro_fast.
+    /// Nested record-like object.
     Object(HashMap<String, AvroValue>),
 }
 
@@ -213,21 +215,16 @@ impl FormatFileReader for AvroFormatReader {
         let target_schema = build_target_arrow_schema(&read_fields)?;
         let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
 
-        // Deserialize all Avro records from the OCF file.
-        let mut reader =
-            serde_avro_fast::object_container_file_encoding::Reader::from_slice(&file_bytes)
-                .map_err(|e| Error::UnexpectedError {
-                    message: format!("Failed to open Avro file: {e}"),
-                    source: Some(Box::new(e)),
-                })?;
-
         let mut all_records: Vec<HashMap<String, AvroValue>> = Vec::new();
-        for result in reader.deserialize_borrowed::<HashMap<String, AvroValue>>() {
+        for result in Reader::new(&file_bytes[..]).map_err(|e| Error::UnexpectedError {
+            message: format!("Failed to open Avro file: {e}"),
+            source: Some(Box::new(e)),
+        })? {
             let record = result.map_err(|e| Error::UnexpectedError {
                 message: format!("Failed to deserialize Avro record: {e}"),
                 source: Some(Box::new(e)),
             })?;
-            all_records.push(record);
+            all_records.push(avro_record_to_hash_map(record)?);
         }
 
         // Apply row selection filtering.
@@ -252,6 +249,65 @@ impl FormatFileReader for AvroFormatReader {
             }
         }
         .boxed())
+    }
+}
+
+fn avro_record_to_hash_map(value: Value) -> crate::Result<HashMap<String, AvroValue>> {
+    match value {
+        Value::Record(fields) => Ok(fields
+            .into_iter()
+            .map(|(name, value)| Ok((name, avro_value_from_value(value)?)))
+            .collect::<crate::Result<HashMap<_, _>>>()?),
+        other => Err(Error::UnexpectedError {
+            message: format!("Expected Avro record, got {other:?}"),
+            source: None,
+        }),
+    }
+}
+
+fn avro_value_from_value(value: Value) -> crate::Result<AvroValue> {
+    match value {
+        Value::Null => Ok(AvroValue::Null),
+        Value::Boolean(v) => Ok(AvroValue::Bool(v)),
+        Value::Int(v) => Ok(AvroValue::Int(i64::from(v))),
+        Value::Long(v) => Ok(AvroValue::Int(v)),
+        Value::Float(v) => Ok(AvroValue::Float(f64::from(v))),
+        Value::Double(v) => Ok(AvroValue::Float(v)),
+        Value::Bytes(v) => Ok(AvroValue::Bytes(v)),
+        Value::String(v) => Ok(AvroValue::String(v)),
+        Value::Fixed(_, v) => Ok(AvroValue::Bytes(v)),
+        Value::Enum(_, v) => Ok(AvroValue::String(v)),
+        Value::Union(_, v) => avro_value_from_value(*v),
+        Value::Array(values) => values
+            .into_iter()
+            .map(avro_value_from_value)
+            .collect::<crate::Result<Vec<_>>>()
+            .map(AvroValue::Array),
+        Value::Map(values) => values
+            .into_iter()
+            .map(|(name, value)| Ok((name, avro_value_from_value(value)?)))
+            .collect::<crate::Result<HashMap<_, _>>>()
+            .map(AvroValue::Object),
+        Value::Record(fields) => fields
+            .into_iter()
+            .map(|(name, value)| Ok((name, avro_value_from_value(value)?)))
+            .collect::<crate::Result<HashMap<_, _>>>()
+            .map(AvroValue::Object),
+        Value::Date(v) => Ok(AvroValue::Int(i64::from(v))),
+        Value::Decimal(v) => Vec::<u8>::try_from(v)
+            .map(AvroValue::Bytes)
+            .map_err(crate::Error::from),
+        Value::BigDecimal(v) => Ok(AvroValue::String(v.to_string())),
+        Value::TimeMillis(v) => Ok(AvroValue::Int(i64::from(v))),
+        Value::TimeMicros(v) => Ok(AvroValue::Int(v)),
+        Value::TimestampMillis(v) => Ok(AvroValue::Int(v)),
+        Value::TimestampMicros(v) => Ok(AvroValue::Int(v)),
+        Value::TimestampNanos(v) => Ok(AvroValue::Int(v)),
+        Value::LocalTimestampMillis(v) => Ok(AvroValue::Int(v)),
+        Value::LocalTimestampMicros(v) => Ok(AvroValue::Int(v)),
+        Value::LocalTimestampNanos(v) => Ok(AvroValue::Int(v)),
+        Value::Duration(v) => Ok(AvroValue::Bytes(<[u8; 12]>::from(v).to_vec())),
+        Value::Uuid(v) => Ok(AvroValue::String(v.to_string())),
     }
 }
 
