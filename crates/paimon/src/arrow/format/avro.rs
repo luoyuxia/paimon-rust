@@ -112,14 +112,12 @@ fn field_index(records: &[Value], name: &str) -> Option<usize> {
 /// Look up a field by cached index with name-based fallback, unwrapping unions.
 fn get_field_at<'a>(record: &'a Value, name: &str, idx: Option<usize>) -> Option<&'a Value> {
     match record {
-        Value::Record(fields) => {
-            if let Some(i) = idx {
-                fields.get(i).map(|(_, v)| v)
-            } else {
-                fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
-            }
-            .and_then(unwrap_value)
+        Value::Record(fields) => if let Some(i) = idx {
+            fields.get(i).map(|(_, v)| v)
+        } else {
+            fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
         }
+        .and_then(unwrap_value),
         _ => None,
     }
 }
@@ -335,15 +333,11 @@ fn build_column(
             let arr: Decimal128Array = (0..num_rows)
                 .map(|i| {
                     get_field_at(&records[i], name, idx).and_then(|v| match v {
-                        // Avro decimal is encoded as big-endian two's complement bytes.
                         Value::Bytes(b) | Value::Fixed(_, b) => Some(bytes_to_i128_be(b)),
-                        Value::Int(n) => Some(i64::from(*n) as i128),
-                        Value::Long(n) => Some(*n as i128),
                         Value::Decimal(d) => Vec::<u8>::try_from(d.clone())
                             .ok()
                             .map(|b| bytes_to_i128_be(&b)),
                         Value::BigDecimal(bd) => parse_decimal_string(&bd.to_string(), scale),
-                        Value::String(s) => parse_decimal_string(s, scale),
                         _ => None,
                     })
                 })
@@ -589,7 +583,7 @@ fn parse_decimal_string(s: &str, scale: i8) -> Option<i128> {
         None => (s, ""),
     };
     let frac_len = frac_part.len() as i8;
-    let combined = format!("{}{}", integer_part, frac_part);
+    let combined = format!("{integer_part}{frac_part}");
     let unscaled: i128 = combined.parse().ok()?;
     // Adjust if the fractional digits differ from the target scale.
     let result = if frac_len < scale {
@@ -705,7 +699,10 @@ mod tests {
     #[test]
     fn test_get_field_at_union_wrapped() {
         let record = make_record(vec![("age", av_union(av_int(30)))]);
-        assert_eq!(get_field_at(&record, "age", Some(0)), Some(&Value::Long(30)));
+        assert_eq!(
+            get_field_at(&record, "age", Some(0)),
+            Some(&Value::Long(30))
+        );
     }
 
     #[test]

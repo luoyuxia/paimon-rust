@@ -19,7 +19,7 @@ use crate::io::FileIO;
 use crate::spec::manifest_common::FileKind;
 use crate::spec::IndexFileMeta;
 use apache_avro::types::Value;
-use apache_avro::{from_avro_datum, from_value, to_avro_datum, to_value, Reader, Schema};
+use apache_avro::{from_value, Reader};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
@@ -147,6 +147,7 @@ impl IndexManifest {
 
 #[cfg(test)]
 mod tests {
+    use apache_avro::{from_avro_datum, to_avro_datum, to_value, Schema};
     use indexmap::IndexMap;
 
     use super::*;

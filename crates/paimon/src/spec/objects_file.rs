@@ -31,33 +31,13 @@ pub fn from_avro_bytes<T: DeserializeOwned>(bytes: &[u8]) -> crate::Result<Vec<T
 /// The `schema_json` must be a valid Avro schema JSON string that matches
 /// the serde serialization layout of `T`.
 pub fn to_avro_bytes<T: Serialize>(schema_json: &str, records: &[T]) -> crate::Result<Vec<u8>> {
-    let schema = Schema::parse_str(schema_json).map_err(|e| crate::Error::DataInvalid {
-        message: format!("invalid avro schema: {e}"),
-        source: Some(Box::new(e)),
-    })?;
+    let schema = Schema::parse_str(schema_json)?;
     let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Null);
     for record in records {
-        let value = to_value(record)
-            .and_then(|value| value.resolve(&schema))
-            .map_err(|e| crate::Error::DataInvalid {
-                message: format!("avro serialization failed: {e}"),
-                source: Some(Box::new(e)),
-            })?;
-        writer
-            .append(value)
-            .map_err(|e| crate::Error::DataInvalid {
-                message: format!("avro serialization failed: {e}"),
-                source: Some(Box::new(e)),
-            })?;
+        let value = to_value(record).and_then(|v| v.resolve(&schema))?;
+        writer.append(value)?;
     }
-    writer.flush().map_err(|e| crate::Error::DataInvalid {
-        message: format!("avro serialization failed: {e}"),
-        source: Some(Box::new(e)),
-    })?;
-    writer.into_inner().map_err(|e| crate::Error::DataInvalid {
-        message: format!("avro serialization failed: {e}"),
-        source: Some(Box::new(e)),
-    })
+    Ok(writer.into_inner()?)
 }
 
 #[cfg(test)]
