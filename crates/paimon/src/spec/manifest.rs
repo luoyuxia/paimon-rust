@@ -18,8 +18,6 @@
 use crate::io::FileIO;
 use crate::spec::manifest_entry::ManifestEntry;
 use crate::spec::manifest_entry::MANIFEST_ENTRY_SCHEMA;
-use apache_avro::types::Value;
-use apache_avro::{from_value, Reader};
 
 use crate::Result;
 
@@ -46,12 +44,7 @@ impl Manifest {
 
     /// Read manifest entries from bytes.
     fn read_from_bytes(bytes: &[u8]) -> Result<Vec<ManifestEntry>> {
-        let reader = Reader::new(bytes).map_err(crate::Error::from)?;
-        let records = reader
-            .collect::<std::result::Result<Vec<Value>, _>>()
-            .map_err(crate::Error::from)?;
-        let values = Value::Array(records);
-        from_value::<Vec<ManifestEntry>>(&values).map_err(crate::Error::from)
+        crate::spec::from_avro_bytes(bytes)
     }
 
     /// Write manifest entries to a file.

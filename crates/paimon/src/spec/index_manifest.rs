@@ -18,8 +18,6 @@
 use crate::io::FileIO;
 use crate::spec::manifest_common::FileKind;
 use crate::spec::IndexFileMeta;
-use apache_avro::types::Value;
-use apache_avro::{from_value, Reader};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
@@ -129,12 +127,7 @@ impl IndexManifest {
 
     /// Read index manifest entries from Avro-encoded bytes.
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Vec<IndexManifestEntry>> {
-        let reader = Reader::new(bytes).map_err(crate::Error::from)?;
-        let records = reader
-            .collect::<std::result::Result<Vec<Value>, _>>()
-            .map_err(crate::Error::from)?;
-        let values = Value::Array(records);
-        from_value::<Vec<IndexManifestEntry>>(&values).map_err(crate::Error::from)
+        crate::spec::from_avro_bytes(bytes)
     }
 
     /// Write index manifest entries to a file.
@@ -147,7 +140,7 @@ impl IndexManifest {
 
 #[cfg(test)]
 mod tests {
-    use apache_avro::{from_avro_datum, to_avro_datum, to_value, Schema};
+    use apache_avro::{from_avro_datum, from_value, to_avro_datum, to_value, types::Value, Schema};
     use indexmap::IndexMap;
 
     use super::*;

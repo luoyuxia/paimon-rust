@@ -109,15 +109,12 @@ fn field_index(records: &[Value], name: &str) -> Option<usize> {
     }
 }
 
-/// Look up a field by cached index with name-based fallback, unwrapping unions.
-fn get_field_at<'a>(record: &'a Value, name: &str, idx: Option<usize>) -> Option<&'a Value> {
-    match record {
-        Value::Record(fields) => if let Some(i) = idx {
-            fields.get(i).map(|(_, v)| v)
-        } else {
-            fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
-        }
-        .and_then(unwrap_value),
+/// Look up a field by cached index, unwrapping unions.
+/// If `idx` is `None` (field not in schema or empty records), returns `None` directly
+/// without linear search, since all records share the same schema.
+fn get_field_at(record: &Value, idx: Option<usize>) -> Option<&Value> {
+    match (record, idx) {
+        (Value::Record(fields), Some(i)) => fields.get(i).map(|(_, v)| v).and_then(unwrap_value),
         _ => None,
     }
 }
@@ -244,14 +241,14 @@ fn build_column(
     Ok(match data_type {
         DataType::Boolean(_) => {
             let arr: BooleanArray = (0..num_rows)
-                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_bool))
+                .map(|i| get_field_at(&records[i], idx).and_then(value_as_bool))
                 .collect();
             Arc::new(arr)
         }
         DataType::TinyInt(_) => {
             let arr: Int8Array = (0..num_rows)
                 .map(|i| {
-                    get_field_at(&records[i], name, idx)
+                    get_field_at(&records[i], idx)
                         .and_then(value_as_i64)
                         .map(|v| v as i8)
                 })
@@ -261,7 +258,7 @@ fn build_column(
         DataType::SmallInt(_) => {
             let arr: Int16Array = (0..num_rows)
                 .map(|i| {
-                    get_field_at(&records[i], name, idx)
+                    get_field_at(&records[i], idx)
                         .and_then(value_as_i64)
                         .map(|v| v as i16)
                 })
@@ -271,7 +268,7 @@ fn build_column(
         DataType::Int(_) => {
             let arr: Int32Array = (0..num_rows)
                 .map(|i| {
-                    get_field_at(&records[i], name, idx)
+                    get_field_at(&records[i], idx)
                         .and_then(value_as_i64)
                         .map(|v| v as i32)
                 })
@@ -280,14 +277,14 @@ fn build_column(
         }
         DataType::BigInt(_) => {
             let arr: Int64Array = (0..num_rows)
-                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_i64))
+                .map(|i| get_field_at(&records[i], idx).and_then(value_as_i64))
                 .collect();
             Arc::new(arr)
         }
         DataType::Float(_) => {
             let arr: Float32Array = (0..num_rows)
                 .map(|i| {
-                    get_field_at(&records[i], name, idx)
+                    get_field_at(&records[i], idx)
                         .and_then(value_as_f64)
                         .map(|v| v as f32)
                 })
@@ -296,19 +293,19 @@ fn build_column(
         }
         DataType::Double(_) => {
             let arr: Float64Array = (0..num_rows)
-                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_f64))
+                .map(|i| get_field_at(&records[i], idx).and_then(value_as_f64))
                 .collect();
             Arc::new(arr)
         }
         DataType::Char(_) | DataType::VarChar(_) => {
             let arr: StringArray = (0..num_rows)
-                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_str))
+                .map(|i| get_field_at(&records[i], idx).and_then(value_as_str))
                 .collect();
             Arc::new(arr)
         }
         DataType::Binary(_) | DataType::VarBinary(_) => {
             let values: Vec<Option<&[u8]>> = (0..num_rows)
-                .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_bytes))
+                .map(|i| get_field_at(&records[i], idx).and_then(value_as_bytes))
                 .collect();
             let arr: BinaryArray = values.into_iter().collect();
             Arc::new(arr)
@@ -316,7 +313,7 @@ fn build_column(
         DataType::Date(_) => {
             let arr: Date32Array = (0..num_rows)
                 .map(|i| {
-                    get_field_at(&records[i], name, idx)
+                    get_field_at(&records[i], idx)
                         .and_then(value_as_i64)
                         .map(|v| v as i32)
                 })
@@ -332,7 +329,7 @@ fn build_column(
             })?;
             let arr: Decimal128Array = (0..num_rows)
                 .map(|i| {
-                    get_field_at(&records[i], name, idx).and_then(|v| match v {
+                    get_field_at(&records[i], idx).and_then(|v| match v {
                         Value::Bytes(b) | Value::Fixed(_, b) => Some(bytes_to_i128_be(b)),
                         Value::Decimal(d) => Vec::<u8>::try_from(d.clone())
                             .ok()
@@ -381,7 +378,7 @@ fn build_timestamp_column(
 ) -> Arc<dyn arrow_array::Array> {
     let idx = field_index(records, name);
     let values: Vec<Option<i64>> = (0..num_rows)
-        .map(|i| get_field_at(&records[i], name, idx).and_then(value_as_i64))
+        .map(|i| get_field_at(&records[i], idx).and_then(value_as_i64))
         .collect();
     match precision {
         0..=3 => Arc::new(TimestampMillisecondArray::from(values).with_timezone_opt(tz)),
@@ -405,7 +402,7 @@ fn build_array_column(
     let mut element_records: Vec<Value> = Vec::new();
 
     for record in records.iter().take(num_rows) {
-        match get_field_at(record, name, idx) {
+        match get_field_at(record, idx) {
             Some(Value::Array(arr)) => {
                 for elem in arr {
                     element_records
@@ -429,7 +426,7 @@ fn build_array_column(
     let offsets_buf = OffsetBuffer::new(ScalarBuffer::from(offsets));
     let nulls = NullBuffer::new(BooleanBuffer::from(
         (0..num_rows)
-            .map(|i| get_field_at(&records[i], name, idx).is_some())
+            .map(|i| get_field_at(&records[i], idx).is_some())
             .collect::<Vec<_>>(),
     ));
 
@@ -461,7 +458,7 @@ fn build_map_column(
     let mut value_records: Vec<Value> = Vec::new();
 
     for record in records.iter().take(num_rows) {
-        match get_field_at(record, name, idx) {
+        match get_field_at(record, idx) {
             Some(Value::Map(map)) => {
                 for (k, v) in map {
                     key_records.push(Value::Record(vec![(
@@ -513,7 +510,7 @@ fn build_map_column(
     let offsets_buf = OffsetBuffer::new(ScalarBuffer::from(offsets));
     let nulls = NullBuffer::new(BooleanBuffer::from(
         (0..num_rows)
-            .map(|i| get_field_at(&records[i], name, idx).is_some())
+            .map(|i| get_field_at(&records[i], idx).is_some())
             .collect::<Vec<_>>(),
     ));
 
@@ -539,7 +536,7 @@ fn build_row_column(
 ) -> crate::Result<Arc<dyn arrow_array::Array>> {
     let idx = field_index(records, name);
     let sub_records: Vec<Value> = (0..num_rows)
-        .map(|i| match get_field_at(&records[i], name, idx) {
+        .map(|i| match get_field_at(&records[i], idx) {
             Some(v @ Value::Record(_)) => v.clone(),
             _ => Value::Record(vec![]),
         })
@@ -561,7 +558,7 @@ fn build_row_column(
 
     let nulls = NullBuffer::new(BooleanBuffer::from(
         (0..num_rows)
-            .map(|i| get_field_at(&records[i], name, idx).is_some())
+            .map(|i| get_field_at(&records[i], idx).is_some())
             .collect::<Vec<_>>(),
     ));
 
@@ -685,7 +682,7 @@ mod tests {
     fn test_get_field_at_present() {
         let record = make_record(vec![("name", av_str("alice"))]);
         assert_eq!(
-            get_field_at(&record, "name", Some(0)),
+            get_field_at(&record, Some(0)),
             Some(&Value::String("alice".to_string()))
         );
     }
@@ -693,23 +690,20 @@ mod tests {
     #[test]
     fn test_get_field_at_missing() {
         let record = make_record(vec![]);
-        assert!(get_field_at(&record, "name", None).is_none());
+        assert!(get_field_at(&record, None).is_none());
     }
 
     #[test]
     fn test_get_field_at_union_wrapped() {
         let record = make_record(vec![("age", av_union(av_int(30)))]);
-        assert_eq!(
-            get_field_at(&record, "age", Some(0)),
-            Some(&Value::Long(30))
-        );
+        assert_eq!(get_field_at(&record, Some(0)), Some(&Value::Long(30)));
     }
 
     #[test]
-    fn test_get_field_at_fallback() {
+    fn test_get_field_at_no_index() {
         let record = make_record(vec![("x", av_int(1)), ("y", av_int(2))]);
-        // No cached index — falls back to linear search.
-        assert_eq!(get_field_at(&record, "y", None), Some(&Value::Long(2)));
+        // idx is None — returns None directly without linear search.
+        assert!(get_field_at(&record, None).is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -886,6 +880,35 @@ mod tests {
         assert_eq!(bytes_to_i128_be(&[0xFF]), -1);
         assert_eq!(bytes_to_i128_be(&[]), 0);
         assert_eq!(bytes_to_i128_be(&[0x00, 0x01]), 1);
+    }
+
+    #[test]
+    fn test_build_column_map_with_union() {
+        use std::collections::HashMap;
+        // Map field wrapped in a union (nullable map), as Avro encodes nullable types.
+        let mut map1 = HashMap::new();
+        map1.insert("k1".to_string(), av_int(10));
+        map1.insert("k2".to_string(), av_int(20));
+        let records = vec![
+            Value::Record(vec![(
+                "m".to_string(),
+                Value::Union(1, Box::new(Value::Map(map1))),
+            )]),
+            Value::Record(vec![(
+                "m".to_string(),
+                Value::Union(0, Box::new(av_null())),
+            )]),
+        ];
+        let map_type = MapType::new(
+            DataType::VarChar(VarCharType::new(100).unwrap()),
+            DataType::Int(IntType::new()),
+        );
+        let col = build_map_column(&records, "m", &map_type, 2).unwrap();
+        let arr = col.as_any().downcast_ref::<MapArray>().unwrap();
+        assert_eq!(arr.len(), 2);
+        // First row has 2 entries, second row is null.
+        assert!(!arr.is_null(0));
+        assert!(arr.is_null(1));
     }
 
     #[test]

@@ -15,15 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use apache_avro::{from_value, to_value, types::Value, Codec, Reader, Schema, Writer};
+use apache_avro::{from_value, to_value, Codec, Reader, Schema, Writer};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 pub fn from_avro_bytes<T: DeserializeOwned>(bytes: &[u8]) -> crate::Result<Vec<T>> {
-    let reader = Reader::new(bytes)?;
-    let records = reader.collect::<std::result::Result<Vec<Value>, _>>()?;
-    let values = Value::Array(records);
-    from_value::<Vec<T>>(&values).map_err(crate::Error::from)
+    Reader::new(bytes)?
+        .map(|r| {
+            let value = r?;
+            from_value::<T>(&value).map_err(crate::Error::from)
+        })
+        .collect()
 }
 
 /// Serialize records into Avro Object Container File bytes.
