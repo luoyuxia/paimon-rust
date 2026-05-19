@@ -48,8 +48,9 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
           VERSION=$(echo "$TAG" | sed 's/-rc\([0-9]*\)/-rc.\1/')
-          sed -i '/^\[workspace\.package\]/,/^\[/{s/^version = "[^"]*"/version = "'"$VERSION"'"/;}' Cargo.toml
-          echo "Patched version to $VERSION"
+          CURRENT=$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\([^"]*\)"/\1/p;}' Cargo.toml)
+          sed -i "s/\"$CURRENT\"/\"$VERSION\"/g" Cargo.toml
+          echo "Patched version from $CURRENT to $VERSION"
 
       - uses: PyO3/maturin-action@v1
         with:
@@ -84,9 +85,10 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
           VERSION=$(echo "$TAG" | sed 's/-rc\([0-9]*\)/-rc.\1/')
-          sed -i.bak '/^\[workspace\.package\]/,/^\[/{s/^version = "[^"]*"/version = "'"$VERSION"'"/;}' Cargo.toml
+          CURRENT=$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\([^"]*\)"/\1/p;}' Cargo.toml)
+          sed -i.bak "s/\"$CURRENT\"/\"$VERSION\"/g" Cargo.toml
           rm -f Cargo.toml.bak
-          echo "Patched version to $VERSION"
+          echo "Patched version from $CURRENT to $VERSION"
 
       - uses: PyO3/maturin-action@v1
         with:
